@@ -419,7 +419,10 @@ def _validate_tree_for_adoption(root: Path) -> None:
         directory = pending.pop()
         for path in directory.iterdir():
             if path.is_symlink():
-                resolved = path.resolve(strict=False)
+                try:
+                    resolved = path.resolve(strict=False)
+                except (OSError, RuntimeError) as exc:
+                    raise ValueError("run tree contains an invalid symlink") from exc
                 if resolved == path.absolute() or resolved.is_dir():
                     raise ValueError("run tree contains a directory symlink")
                 if not resolved.is_relative_to(canonical_root):

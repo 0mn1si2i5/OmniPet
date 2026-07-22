@@ -187,11 +187,12 @@ class CanonicalAdoptionTests(unittest.TestCase):
 
         self.assertEqual(self._snapshot(self.run_dir), before)
         adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
+        digest = hashlib.sha256(self.project.canonical_base_path.read_bytes()).hexdigest()
         self.assertEqual(
             {str(path.relative_to(self.run_dir / "qa")) for path in (self.run_dir / "qa").rglob("*") if path.is_file()},
             {
                 "progress.md", "time-log.json",
-                "visual-jobs/canonical-approved-a89cb2860975.result.json",
+                f"visual-jobs/canonical-approved-{digest[:12]}.result.json",
             },
         )
         archive = sorted((self.repo_root / ".omnipet" / "archives").glob("sample-pet-canonical-adoption-*"))[-1]
@@ -461,11 +462,13 @@ class CanonicalAdoptionTests(unittest.TestCase):
             with self.subTest(target=target):
                 link = self.run_dir / "cycle"
                 link.symlink_to(target, target_is_directory=True)
-                before = self._snapshot(self.run_dir)
-                with self.assertRaises(RunPreparationError):
-                    adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
-                self.assertEqual(self._snapshot(self.run_dir), before)
-                link.unlink()
+                try:
+                    before = self._snapshot(self.run_dir)
+                    with self.assertRaises(RunPreparationError):
+                        adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
+                    self.assertEqual(self._snapshot(self.run_dir), before)
+                finally:
+                    link.unlink(missing_ok=True)
 
     def test_backup_cleanup_failure_keeps_successful_state_and_recoverable_backup(self):
         real_rmtree = __import__("shutil").rmtree
