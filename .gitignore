@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.superpowers/
+.worktrees/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+# Generated pet runs, archives, and disposable image-generation intermediates.
+.omnipet/
+runs/
+tmp/
+output/

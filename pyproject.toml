@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omnipet"
+version = "0.1.0a1"
+description = "A guided workflow for generating, reviewing, and packaging animated desktop pets"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = ["openai>=2.46,<3", "Pillow>=12,<13", "PyYAML>=6,<7"]
+keywords = ["animated-pets", "sprite", "spritesheet", "openai", "image-generation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: POSIX",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
+
+[project.urls]
+Homepage = "https://github.com/0mn1si2i5/OmniPet"
+Repository = "https://github.com/0mn1si2i5/OmniPet.git"
+Issues = "https://github.com/0mn1si2i5/OmniPet/issues"
+Changelog = "https://github.com/0mn1si2i5/OmniPet/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["setuptools>=75", "packaging>=24", "twine>=6,<7"]
+
+[project.scripts]
+omnipet = "omnipet.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["omnipet*"]
+
+[tool.setuptools.package-data]
+omnipet = [
+  "_vendor/hatch/NOTICE",
+  "_vendor/hatch/*.json",
+  "_vendor/hatch/*.md",
+  "_vendor/hatch/*.txt",
+  "_vendor/hatch/references/*.md",
+  "_vendor/hatch/scripts/*.py",
+  "templates/pet/*.md",
+  "templates/pet/*.yaml",
+  "templates/pet/prompts/*.md",
+]

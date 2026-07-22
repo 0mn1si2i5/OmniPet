@@ -1,0 +1,27 @@
+{
+  "upstream_source": "Codex hatch-pet skill distribution",
+  "license": "Apache-2.0",
+  "files": [
+    {"path": "LICENSE.txt", "sha256_original": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9", "sha256_vendored": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9", "modified": false},
+    {"path": "references/animation-rows.md", "sha256_original": "d27b08d599e73cf6a65a03d2b8ad49e9ad408e18292636164e7b2d2f1815615f", "sha256_vendored": "d27b08d599e73cf6a65a03d2b8ad49e9ad408e18292636164e7b2d2f1815615f", "modified": false},
+    {"path": "references/codex-pet-contract.md", "sha256_original": "8f9c271e0a8269e57cd27cedeff1317975ea5f772f2549572aeefa580d9d58d3", "sha256_vendored": "b91df5e7738a7f64f83a3589efc12a08654821fa271556afe3e4fe065afac047", "modified": true},
+    {"path": "references/qa-rubric.md", "sha256_original": "46bd447611d101cca0d89692ee566cfd58abfea30d4cfb7749b2c930e0b7deaf", "sha256_vendored": "46bd447611d101cca0d89692ee566cfd58abfea30d4cfb7749b2c930e0b7deaf", "modified": false},
+    {"path": "scripts/assemble_extended_atlas.py", "sha256_original": "ca50b13d62858a660e1ae2d15649a1ccb565d03ee185539d22df0e121075eadc", "sha256_vendored": "27101d97c70cc32fda8f31aeddd9179be66be2c04455b633482a25bb3672e331", "modified": true},
+    {"path": "scripts/combine_direction_blind_verdicts.py", "sha256_original": "4dad56adaad032a4e6d070494b0ab2ca316429cf69363450f9fbf7135d1c2d42", "sha256_vendored": "4dad56adaad032a4e6d070494b0ab2ca316429cf69363450f9fbf7135d1c2d42", "modified": false},
+    {"path": "scripts/compose_atlas.py", "sha256_original": "a76d7c8b81033353004f5cafab8fa174c314f1d79158b69bc83a2f0bd6047fdf", "sha256_vendored": "a76d7c8b81033353004f5cafab8fa174c314f1d79158b69bc83a2f0bd6047fdf", "modified": false},
+    {"path": "scripts/compose_cardinal_anchor_strip.py", "sha256_original": "e67ac9816a909cad136189bf23eddf8b16e0fcb430ade2262556bbd12db2bca5", "sha256_vendored": "e67ac9816a909cad136189bf23eddf8b16e0fcb430ade2262556bbd12db2bca5", "modified": false},
+    {"path": "scripts/derive_running_left_from_running_right.py", "sha256_original": "ae42859720220fe8a407fc0dfff06e8344e535c6c8019220b1f63db7714baa77", "sha256_vendored": "ae42859720220fe8a407fc0dfff06e8344e535c6c8019220b1f63db7714baa77", "modified": false},
+    {"path": "scripts/despill_chroma_edges.py", "sha256_original": "dc93a5e752f4100e55010205462a8e7272bac451ee7e29b525abd6157a7fe309", "sha256_vendored": "dc93a5e752f4100e55010205462a8e7272bac451ee7e29b525abd6157a7fe309", "modified": false},
+    {"path": "scripts/extract_cardinal_anchors.py", "sha256_original": "55434d06bc328b1879d98c821f2586963910f89926f4dcbe92682b25555a8cde", "sha256_vendored": "55434d06bc328b1879d98c821f2586963910f89926f4dcbe92682b25555a8cde", "modified": false},
+    {"path": "scripts/extract_strip_frames.py", "sha256_original": "86301292945550c4b2c318815c9bfd97a1f9b3fa4e83aea7b31bcfa2ca20e1f2", "sha256_vendored": "86301292945550c4b2c318815c9bfd97a1f9b3fa4e83aea7b31bcfa2ca20e1f2", "modified": false},
+    {"path": "scripts/inspect_frames.py", "sha256_original": "9ef930151ae845a3c9eb3c10dfc8da95947535d18c72992cff5f65081af4c30a", "sha256_vendored": "9ef930151ae845a3c9eb3c10dfc8da95947535d18c72992cff5f65081af4c30a", "modified": false},
+    {"path": "scripts/make_contact_sheet.py", "sha256_original": "51e2085b8acb172dcdd5fff9993bdee413f3851b714229ca095dc99cd551aa96", "sha256_vendored": "51e2085b8acb172dcdd5fff9993bdee413f3851b714229ca095dc99cd551aa96", "modified": false},
+    {"path": "scripts/make_direction_blind_qa_sheet.py", "sha256_original": "52f2a29251872449fed51c7744c3f9f503274ee288eb23efc29a2c568b0d52bd", "sha256_vendored": "52f2a29251872449fed51c7744c3f9f503274ee288eb23efc29a2c568b0d52bd", "modified": false},
+    {"path": "scripts/make_direction_qa_sheet.py", "sha256_original": "823e81e0aece24d1d6537889c9daaa2660208ff52604509b24fd5e24e7302acb", "sha256_vendored": "823e81e0aece24d1d6537889c9daaa2660208ff52604509b24fd5e24e7302acb", "modified": false},
+    {"path": "scripts/measure_direction_continuity.py", "sha256_original": "e24b7065af82eab5638f1fcdeb627d497391a2f1e9ba19801827d1db3a6d8c2d", "sha256_vendored": "e24b7065af82eab5638f1fcdeb627d497391a2f1e9ba19801827d1db3a6d8c2d", "modified": false},
+    {"path": "scripts/prepare_pet_run.py", "sha256_original": "ca9809003e95248339db3c9fe0625e4e871732146bf06e19efc091191bd9da1f", "sha256_vendored": "168ad2a5e30ec891c6f8c51721da9d4630d9729434c53fc59f5f2a4ec1a2e05d", "modified": true},
+    {"path": "scripts/render_animation_previews.py", "sha256_original": "911e8813e1b79b7f9da44fae8a667c044818e8c71f41eaa4b280e91c78cde61e", "sha256_vendored": "911e8813e1b79b7f9da44fae8a667c044818e8c71f41eaa4b280e91c78cde61e", "modified": false},
+    {"path": "scripts/validate_atlas.py", "sha256_original": "ebbbc77cfbd27ef8476ac6fda716e864cf372a2ed4c2beb27ebdb2487e972194", "sha256_vendored": "ebbbc77cfbd27ef8476ac6fda716e864cf372a2ed4c2beb27ebdb2487e972194", "modified": false},
+    {"path": "scripts/validate_direction_blind_verdicts.py", "sha256_original": "7871667432918e0ffcdbb9beaf88a01c0af4b9e2809c5000f7b533a9ddc6e13d", "sha256_vendored": "7871667432918e0ffcdbb9beaf88a01c0af4b9e2809c5000f7b533a9ddc6e13d", "modified": false}
+  ]
+}

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install development environment
+        run: pip install -e '.[dev]'
+      - name: Run package suite
+        run: scripts/test-all.sh
+      - name: Build wheel and source distribution
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          mkdir dist
+          python -c "import setuptools.build_meta as backend; backend.build_wheel('dist'); backend.build_sdist('dist')"
+      - name: Check distributions
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: python -m twine check dist/*
+      - name: Smoke test wheel
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          python -m venv /tmp/omnipet-wheel-smoke
+          /tmp/omnipet-wheel-smoke/bin/pip install dist/*.whl
+          cd /tmp/omnipet-wheel-smoke
+          bin/omnipet --version
+          bin/omnipet pet init my-pet
+          bin/omnipet pet validate my-pet
+      - name: Build and smoke test source distribution
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          mkdir /tmp/omnipet-sdist-wheel
+          python -m pip wheel --no-deps dist/*.tar.gz -w /tmp/omnipet-sdist-wheel
+          python -m venv /tmp/omnipet-sdist-smoke
+          /tmp/omnipet-sdist-smoke/bin/pip install /tmp/omnipet-sdist-wheel/*.whl
+          cd /tmp/omnipet-sdist-smoke
+          bin/omnipet --version
+          bin/omnipet pet init my-pet
+          bin/omnipet pet validate my-pet

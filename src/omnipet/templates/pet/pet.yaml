@@ -1,0 +1,17 @@
+schema_version: 1
+id: example-pet
+display_name: Example Pet
+description: Replace with one sentence describing the pet.
+brief: brief.md
+style:
+  preset: pixel
+  notes: Replace with the approved rendering style.
+references: []
+image_generation:
+  model: gpt-image-2
+  quality: low
+hatch_engine:
+  minimum_sprite_version: 2
+package:
+  spritesheet: dist/spritesheet.webp
+  manifest: dist/pet.json

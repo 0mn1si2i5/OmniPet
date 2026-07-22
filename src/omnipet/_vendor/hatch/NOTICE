@@ -1,0 +1,8 @@
+This directory contains the Codex hatch-pet skill distribution,
+licensed under the Apache License 2.0.
+
+See LICENSE.txt for the license terms, VENDORING.md for provenance, and
+MANIFEST.json for byte-level SHA-256 verification.
+
+OmniPet modified scripts/assemble_extended_atlas.py to use a stable package
+import and references/codex-pet-contract.md to describe OmniPet packaging.

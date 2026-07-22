@@ -1,0 +1,5 @@
+OmniPet includes the vendored Codex hatch-pet skill distribution,
+licensed under the Apache License 2.0.
+
+The vendored source and its license are located in
+src/omnipet/_vendor/hatch.

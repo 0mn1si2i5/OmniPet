@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "columns": 8,
+  "rows": 11,
+  "cell_width": 192,
+  "cell_height": 208,
+  "frame_counts": [6, 8, 8, 4, 5, 8, 6, 6, 6, 8, 8],
+  "extended_neutral": [0, 6]
+}

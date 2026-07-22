@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible OmniPet defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve the alpha. Never include API keys, private images, or raw provider responses.
+  - type: input
+    id: version
+    attributes:
+      label: OmniPet version
+      placeholder: 0.1.0a1
+    validations:
+      required: true
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python version
+      options: ["3.12", "3.13", "3.14", "Other"]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include sanitized commands, status output, and the smallest project description that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private assets, personal data, absolute user paths, and raw provider responses.
+          required: true

@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install development environment
+        run: pip install -e '.[dev]'
+      - name: Verify release tag matches package version
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import os
+          from pathlib import Path
+          import tomllib
+
+          project_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          installed_version = importlib.metadata.version("omnipet")
+          expected_tag = f"v{project_version}"
+          if installed_version != project_version or os.environ["GITHUB_REF_NAME"] != expected_tag:
+              raise SystemExit(
+                  f"release mismatch: tag={os.environ['GITHUB_REF_NAME']!r}, "
+                  f"project={project_version!r}, installed={installed_version!r}"
+              )
+          PY
+      - name: Run package suite
+        run: scripts/test-all.sh
+      - name: Build distributions
+        run: |
+          mkdir dist
+          python -c "import setuptools.build_meta as backend; backend.build_wheel('dist'); backend.build_sdist('dist')"
+      - name: Check distributions
+        run: python -m twine check dist/*
+      - name: Smoke test wheel
+        run: |
+          python -m venv /tmp/omnipet-wheel-smoke
+          /tmp/omnipet-wheel-smoke/bin/pip install dist/*.whl
+          cd /tmp/omnipet-wheel-smoke
+          bin/omnipet --version
+          bin/omnipet pet init my-pet
+          bin/omnipet pet validate my-pet
+      - name: Build and smoke test source distribution
+        run: |
+          mkdir /tmp/omnipet-sdist-wheel
+          python -m pip wheel --no-deps dist/*.tar.gz -w /tmp/omnipet-sdist-wheel
+          python -m venv /tmp/omnipet-sdist-smoke
+          /tmp/omnipet-sdist-smoke/bin/pip install /tmp/omnipet-sdist-wheel/*.whl
+          cd /tmp/omnipet-sdist-smoke
+          bin/omnipet --version
+          bin/omnipet pet init my-pet
+          bin/omnipet pet validate my-pet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-github:
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: true
