@@ -219,6 +219,64 @@ class GuidedCliTests(unittest.TestCase):
         self.assertEqual(json.loads(stderr), {"ok": False, "error": "qa failed"})
         self.assertNotIn("secret", stderr)
 
+    def test_release_verify_dispatches_without_loading_a_project(self):
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        with patch("omnipet.cli.verify_public_release", return_value={
+            "petId": "public-pet", "version": "1.2.3",
+        }) as verify, patch(
+            "omnipet.cli.load_pet_project",
+            side_effect=AssertionError("verify must be clean-room"),
+        ) as load:
+            result, stdout, stderr = self.call([
+                "release", "verify", str(bundle),
+            ])
+
+        self.assertEqual((result, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout), {
+            "ok": True,
+            "pet_id": "public-pet",
+            "verified": True,
+            "version": "1.2.3",
+        })
+        verify.assert_called_once_with(bundle)
+        load.assert_not_called()
+
+    def test_release_export_loads_project_and_sanitizes_failures(self):
+        self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
+        destination = self.root / "release-work/cli-pet-0.1.0"
+        destination.mkdir(parents=True)
+        (destination / "release.json").write_text(
+            '{"petId":"cli-pet","version":"0.1.0"}'
+        )
+        with patch(
+            "omnipet.cli.export_public_release", return_value=destination
+        ) as export:
+            result, stdout, stderr = self.call([
+                "release", "export", "cli-pet",
+                "--repo-root", str(self.root),
+                "--output", str(destination),
+            ])
+        self.assertEqual((result, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["version"], "0.1.0")
+        self.assertEqual(export.call_args.args[1], destination)
+
+        with patch(
+            "omnipet.cli.export_public_release",
+            side_effect=ValueError("private secret"),
+        ):
+            result, _stdout, stderr = self.call([
+                "release", "export", "cli-pet",
+                "--repo-root", str(self.root),
+                "--output", str(destination),
+            ])
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            json.loads(stderr),
+            {"ok": False, "error": "release export failed"},
+        )
+        self.assertNotIn("secret", stderr)
+
     def test_package_check_rejection_is_nonzero_and_read_only(self):
         self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
         project = load_pet_project(self.root, "cli-pet")

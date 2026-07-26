@@ -420,6 +420,21 @@ class ReleaseWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             reset_failed_job(self.project, "idle")
 
+    def test_aggregate_standard_qa_failure_is_deterministic_qa(self):
+        generator = FakeGenerator()
+        hatch_project(self.project, generator_factory=lambda _project: generator)
+        approve_project_stage(self.project, "base")
+
+        with patch("omnipet.release._qa_standard", side_effect=ValueError("private")):
+            result = hatch_project(
+                self.project, generator_factory=lambda _project: generator
+            )
+
+        self.assertIsNone(result.blocked["job"])
+        self.assertEqual(
+            result.blocked["diagnostic"]["category"], "deterministic-qa"
+        )
+
     def test_clear_block_rejects_job_failure_and_reset_rejects_aggregate_block(self):
         generator = FakeGenerator(fail_job="base")
         hatch_project(self.project, generator_factory=lambda _project: generator)

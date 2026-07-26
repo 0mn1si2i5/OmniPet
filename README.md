@@ -1,111 +1,54 @@
 # OmniPet
 
-> **Alpha software (`0.1.0a1`)**: interfaces and project files may change. Keep source art and checkpoints backed up, inspect every generated image, and expect rough edges.
+[English](README.en.md)
 
-OmniPet is a guided, resumable workflow for generating and packaging v2 animated desktop pets. One Python package supplies OpenAI image generation, the built-in hatch engine, deterministic image tooling, approval gates, QA, checkpoints, and final package validation. No separate runtime installation is needed.
+> **Alpha（`0.1.0a1`）**：接口和项目文件仍可能变化；请在正式使用前检查生成结果。
 
-## What Works
+OmniPet 是生成、QA、修复、打包和发布桌宠 sprite v2 的开源引擎。它通过官方 OpenAI SDK 调用 `gpt-image-2`，并把可恢复的本地工作状态、checkpoint 与最终可安装包分开管理。
 
-- Prompt-only or reference-grounded pet projects with durable briefs and manifests.
-- Built-in `gpt-image-2` generation through the official OpenAI SDK.
-- A canonical-base approval followed by nine standard animation rows and 16 look directions.
-- Row extraction, previews, direction checks, one final chroma despill, and 1536x2288 v2 atlas validation.
-- Explicit QA and approval pauses, resumable local run state, portable checkpoints, and atomic publication of `pet.json` and `spritesheet.webp`.
+只想安装桌宠？请访问公开目录 [OmniPets](https://github.com/0mn1si2i5/OmniPets)。创作者可在本地或私有生产仓中使用 OmniPet，完成后导出已校验的公开发布包。
 
-## Install
+## 安装与开始
 
-OmniPet requires Python 3.12 or newer.
+需要 Python 3.12 或更高版本：
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install omnipet
-.venv/bin/omnipet --version
 export OPENAI_API_KEY="your-key"
-```
-
-`OPENAI_API_KEY` is read only from the process environment. Do not put it in `pet.yaml`, prompts, shell history, issue reports, or checkpoints.
-
-## Quick Start
-
-`omnipet pet init` uses the template shipped in the installed distribution and creates an immediately valid prompt-only project. Add a real reference for best identity quality:
-
-```sh
 omnipet pet init my-pet
-mkdir -p pets/my-pet/references
-cp /path/to/your-character.png pets/my-pet/references/your-character.png
 omnipet pet validate my-pet
 omnipet hatch my-pet
 omnipet status my-pet
 ```
 
-Edit `pets/my-pet/pet.yaml` and `brief.md` before hatching. The first hatch call creates one base candidate and pauses. Inspect the paths in status output, then continue through the explicit stages:
+`OPENAI_API_KEY` 由 OpenAI SDK 从进程环境读取；不要提交它。图像请求可能产生费用，并会将提示词和已配置的参考图发送给 OpenAI——请只使用有权处理的内容。
+
+首次 `hatch` 会生成 base candidate 并暂停；按 `status` 给出的下一步继续审批、QA 与打包即可。常用命令：
 
 ```sh
 omnipet approve my-pet --stage base --note "identity accepted"
 omnipet hatch my-pet
-omnipet qa my-pet --stage standard-rows --verdict-file standard-verdict.json
-omnipet approve my-pet --stage standard-rows
-omnipet hatch my-pet
-omnipet qa my-pet --stage directions --verdict-file direction-verdict.json
-omnipet approve my-pet --stage directions
-omnipet hatch my-pet
-omnipet qa my-pet --stage package --verdict-file package-verdict.json
-omnipet approve my-pet --stage package
 omnipet package my-pet --check
 omnipet package my-pet
-omnipet checkpoint export my-pet
+omnipet release export my-pet --output release-work/my-pet
+omnipet release verify release-work/my-pet
 ```
 
-Direction QA is phased: cardinals, look row 9, then look row 10. Follow `omnipet status my-pet` after every command; it reports the next bounded action. Approval pauses are intentional and OmniPet does not retry generation automatically. A failed provider job remains blocked until you inspect it and explicitly run `omnipet hatch my-pet --reset-failed <job-id>`.
+完整 QA 与发布流程见 [生成工作流](docs/generation-workflow.md) 和 [package review](docs/package-review.md)。
 
-Package QA requires three independent blind reviews, a 16-direction final semantic review, and a final visual review bound to the generated artifacts by path and SHA-256. Create `package-verdict.json` from the evidence produced by the preceding hatch step; see [`docs/package-review.md`](docs/package-review.md) for the closed JSON contract and review workflow. Do not reuse example hashes or record a pass before completing the reviews.
-
-## Costs And Privacy
-
-OpenAI image requests may incur costs. OmniPet cannot predict or cap provider charges, so review the provider's current published rates and account limits before hatching. Each accepted workflow normally requires multiple image requests; failed work is not retried automatically.
-
-Prompts and configured reference images are sent to OpenAI. Review OpenAI's current data and privacy terms, and use only images you have the right and consent to process. Local run state may contain generated images and sanitized service metadata. Credentials are prohibited by contract, but validation is a bounded closed schema and not an exhaustive secret detector.
-
-## Project Structure
+## 工作目录
 
 ```text
-pets/my-pet/                 durable source, approvals, checkpoint, package
-|-- pet.yaml
-|-- brief.md
-|-- references/
-|-- approved/
-|-- checkpoint/
-`-- dist/
-.omnipet/runs/my-pet/        ignored, resumable working state
-.omnipet/archives/           replaced run archives
+pets/my-pet/                 应提交的项目输入、checkpoint 与最终 dist/
+.omnipet/runs/my-pet/        忽略的可恢复运行状态
+.omnipet/archives/           忽略的运行状态替换归档
 ```
 
-Commit briefs, licensed references, approved identity assets, refinement decisions, selected QA evidence, checkpoints, and final package files. Do not commit `.omnipet/`, rejected attempts, generated guides, frame caches, logs, credentials, or local environments.
+`.omnipet` 不是某个仓库专属目录：命令在哪个项目仓运行，就可能在那里生成它。官方生产通常在 `OmniPet-Production` 保存持久化项目文件；无论在生产仓、引擎开发仓还是个人项目中，`.omnipet` 都应保持本地忽略、不提交。
 
-## Recovery
+## SuShi 示例
 
-Start with `omnipet status my-pet`. Correct deterministic failures without regenerating accepted visual work. Use `--reset-failed <job-id>` only for a failed generation job and `--clear-block` only after correcting an aggregate non-job failure.
+[SuShi v1.0.1](https://github.com/0mn1si2i5/OmniPets/tree/main/pets/sushi) 是完整的公开发布示例，包含已校验的 `pet.json`、sprite 图集与预览。公开仓只放可安装产物；生产 checkpoint 和修复记录不随发布包公开。
 
-Export accepted work with `omnipet checkpoint export my-pet`. Restore it with `omnipet checkpoint restore my-pet`; pass `--force` only when you intend to archive and replace existing run state. If disposable state is irreparable and no checkpoint exists, remove only `.omnipet/runs/my-pet` and hatch again. Never delete approved source assets as a recovery step.
-
-## Troubleshooting
-
-- `invalid pet project`: run `omnipet pet validate my-pet`, then check IDs, relative paths, YAML fields, and symlinks.
-- `hatch failed` or blocked status: inspect the reported job and QA evidence. OmniPet deliberately hides provider details that may contain sensitive data.
-- Missing key: export `OPENAI_API_KEY` in the same shell that runs OmniPet.
-- Package failure: complete all QA and approval gates, then run `omnipet package my-pet --check` before publication.
-- Interrupted process: run `omnipet status my-pet`; accepted run artifacts are designed to resume.
-
-## Current Limitations And Roadmap
-
-The alpha supports one built-in image model and one package format. It has no graphical interface, arbitrary model selection, custom endpoint support, unattended approvals, automatic retries, or provider cost accounting. Visual verdict files still require careful human preparation.
-
-The roadmap is driven by alpha feedback: clearer verdict authoring, stronger visual review ergonomics, migration tooling for schema changes, and broader platform verification. These are directions, not compatibility promises.
-
-See `docs/architecture.md`, `docs/pet-project-format.md`, and `docs/generation-workflow.md` for the maintained contract.
-
-For development, install the local package with `.venv/bin/pip install -e '.[dev]'` and run `scripts/test-all.sh`.
-
-## Featured Project
-
-`OmniPet-SuShi` demonstrates the workflow in an independent project. Its visual release is blocked pending rights confirmation, so no character assets are bundled here.
+开发贡献请见 [CONTRIBUTING.md](CONTRIBUTING.md)。

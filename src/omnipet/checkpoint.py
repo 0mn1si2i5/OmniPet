@@ -322,6 +322,7 @@ def _copy_artifact(
 
 def _export_accepted_qa(run_dir: Path, staging: Path, completed: set[str]) -> list[dict[str, str]]:
     from omnipet.approvals import STAGE_EVIDENCE_PATHS, load_approvals
+    from omnipet.review_resolution import resolution_artifact_paths
 
     result = []
     anchors = {
@@ -346,6 +347,29 @@ def _export_accepted_qa(run_dir: Path, staging: Path, completed: set[str]) -> li
             }
             guided_records.append(record)
             result.append(record)
+        if approval.stage == "package":
+            continuity = _read_json(run_dir / "qa/package-generated/continuity.json")
+            resolution_paths = (
+                resolution_artifact_paths(run_dir, "qa/package-generated/continuity.json")
+                if continuity.get("warnings") else set()
+            )
+            for value in sorted(resolution_paths):
+                if value in {record["path"] for record in guided_records}:
+                    continue
+                source = run_dir / value
+                destination = staging / value
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(_normalized_evidence_bytes(run_dir, source))
+                if Path(value).parts[:2] == ("qa", "resolutions"):
+                    resolution = _read_json(destination)
+                    report = resolution.get("source_report")
+                    if isinstance(report, dict) and report.get("path"):
+                        report["sha256"] = _sha256(staging / report["path"])
+                    resolution = _refresh_evidence_hashes(
+                        resolution, staging, set(STAGE_EVIDENCE_PATHS["package"])
+                    )
+                    _write_json(destination, resolution)
+                result.append({"job_id": anchors[approval.stage], "path": value, "sha256": _sha256(destination)})
 
     selected = {record["path"] for record in guided_records}
     for record in guided_records:
@@ -426,7 +450,8 @@ def _accepted_evidence_path(value: Any) -> Path:
     path = Path(value)
     guided = {item for paths in STAGE_EVIDENCE_PATHS.values() for item in paths}
     legacy = len(path.parts) == 2 and path.parts[0] == "qa" and path.name.endswith(".result.json")
-    if path.is_absolute() or ".." in path.parts or (value not in guided and not legacy):
+    resolution = len(path.parts) == 3 and path.parts[:2] == ("qa", "resolutions") and path.suffix == ".json"
+    if path.is_absolute() or ".." in path.parts or (value not in guided and not legacy and not resolution):
         raise ValueError("checkpoint QA path is unsafe")
     return path
 

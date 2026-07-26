@@ -1,5 +1,10 @@
 # Pet Project
 
+This file becomes the public English README for the pet. Before release, replace it with
+the pet description, attribution, and installation notes. Keep production inputs, prompts,
+checkpoints, and detailed QA records out of this file. The matching Chinese public README
+is `README.zh-CN.md`, and the asset license is declared in `LICENSE-ASSETS`.
+
 The template is immediately valid for prompt-only generation. For the best identity quality,
 add a cleared character reference before generation:
 

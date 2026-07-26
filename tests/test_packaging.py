@@ -59,7 +59,10 @@ class PackagingTests(unittest.TestCase):
 
                         self.assertEqual(metadata["License-Expression"], "Apache-2.0")
                         self.assertEqual(metadata.get_all("License-File"), ["LICENSE"])
-                        self.assertEqual(metadata.get_payload(), readme)
+                        self.assertEqual(
+                            metadata.get_payload(decode=True).decode("utf-8"),
+                            readme,
+                        )
                         self.assertTrue(
                             any(member.endswith(".dist-info/licenses/LICENSE") for member in members)
                         )
@@ -72,6 +75,8 @@ class PackagingTests(unittest.TestCase):
                         self.assertIn("omnipet/_vendor/__init__.py", members)
                         self.assertIn("omnipet/_vendor/hatch/__init__.py", members)
                         self.assertIn("omnipet/templates/pet/README.md", members)
+                        self.assertIn("omnipet/templates/pet/README.zh-CN.md", members)
+                        self.assertIn("omnipet/templates/pet/LICENSE-ASSETS", members)
                         self.assertIn("omnipet/templates/pet/brief.md", members)
                         self.assertIn("omnipet/templates/pet/pet.yaml", members)
                         self.assertIn("omnipet/templates/pet/prompts/refinements.md", members)
@@ -83,6 +88,8 @@ class PackagingTests(unittest.TestCase):
                         self.assertTrue(any(member.endswith("/README.md") for member in members))
                         for relative in (
                             "src/omnipet/templates/pet/README.md",
+                            "src/omnipet/templates/pet/README.zh-CN.md",
+                            "src/omnipet/templates/pet/LICENSE-ASSETS",
                             "src/omnipet/templates/pet/brief.md",
                             "src/omnipet/templates/pet/pet.yaml",
                             "src/omnipet/templates/pet/prompts/refinements.md",
@@ -205,6 +212,12 @@ class PackagingTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(validated.returncode, 0, validated.stderr)
+        initialized_root = environment_root / "pets" / "my-pet"
+        manifest_text = (initialized_root / "pet.yaml").read_text(encoding="utf-8")
+        self.assertIn("release:", manifest_text)
+        self.assertIn("readme_zh_cn: README.zh-CN.md", manifest_text)
+        self.assertTrue((initialized_root / "README.zh-CN.md").is_file())
+        self.assertTrue((initialized_root / "LICENSE-ASSETS").is_file())
 
 
 if __name__ == "__main__":

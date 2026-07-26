@@ -10,7 +10,12 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
-dependencies = ["openai>=2.46,<3", "Pillow>=12,<13", "PyYAML>=6,<7"]
+dependencies = [
+  "openai>=2.46,<3",
+  "packaging>=24.2,<27",
+  "Pillow>=12,<13",
+  "PyYAML>=6,<7",
+]
 keywords = ["animated-pets", "sprite", "spritesheet", "openai", "image-generation"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -49,5 +54,6 @@ omnipet = [
   "_vendor/hatch/scripts/*.py",
   "templates/pet/*.md",
   "templates/pet/*.yaml",
+  "templates/pet/LICENSE-ASSETS",
   "templates/pet/prompts/*.md",
 ]

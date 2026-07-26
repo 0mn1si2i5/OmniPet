@@ -513,6 +513,12 @@ class PortableCheckpointTests(unittest.TestCase):
         (root / "references").mkdir(parents=True)
         (root / "approved").mkdir()
         (root / "brief.md").write_text("# Ember\n", encoding="utf-8")
+        (root / "README.md").write_text("# Ember\n", encoding="utf-8")
+        (root / "README.zh-CN.md").write_text("# Ember\n", encoding="utf-8")
+        (root / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         (root / "references" / "portrait.png").write_bytes(b"portrait")
         Image.new("RGBA", (1, 1), (1, 2, 3, 255)).save(root / "approved" / "canonical-base.png", "PNG")
         (root / "pet.yaml").write_text("""schema_version: 1
@@ -533,6 +539,13 @@ hatch_engine:
 package:
   spritesheet: dist/spritesheet.webp
   manifest: dist/pet.json
+release:
+  version: 1.0.0
+  asset_license: CC-BY-NC-4.0
+  readme: README.md
+  readme_zh_cn: README.zh-CN.md
+  asset_license_file: LICENSE-ASSETS
+  preview_source: approved/canonical-base.png
 approved:
   canonical_base: approved/canonical-base.png
 """, encoding="utf-8")

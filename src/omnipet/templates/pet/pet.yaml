@@ -15,3 +15,10 @@ hatch_engine:
 package:
   spritesheet: dist/spritesheet.webp
   manifest: dist/pet.json
+release:
+  version: 0.1.0
+  asset_license: CC-BY-NC-4.0
+  readme: README.md
+  readme_zh_cn: README.zh-CN.md
+  asset_license_file: LICENSE-ASSETS
+  preview_source: dist/spritesheet.webp

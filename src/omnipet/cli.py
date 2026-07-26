@@ -10,9 +10,16 @@ import yaml
 
 from omnipet import __version__
 from omnipet.checkpoint import CheckpointError, export_checkpoint, restore_checkpoint
+from omnipet.guides import add_generation_guide
 from omnipet.hatch import HatchExecutionError
 from omnipet.package import PackageError, check_package, publish_package, recover_package
 from omnipet.project import ProjectValidationError, load_pet_project
+from omnipet.public_release import (
+    PublicReleaseError,
+    export_public_release,
+    verify_public_release,
+)
+from omnipet.review_resolution import ResolutionError, create_warning_resolution
 from omnipet.release import (
     approve_project_stage,
     clear_project_block,
@@ -20,6 +27,7 @@ from omnipet.release import (
     init_pet_project,
     project_status,
     qa_project_stage,
+    repair_project_job,
     reset_failed_job,
 )
 from omnipet.run import (
@@ -30,7 +38,18 @@ from omnipet.run import (
 )
 
 
+_WORKFLOW_ERRORS = {
+    "hatch": "hatch failed",
+    "approve": "approve failed",
+    "qa": "qa failed",
+    "status": "status failed",
+}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] == ["qa", "resolve"]:
+        argv[:2] = ["qa-resolve"]
     parser = argparse.ArgumentParser(prog="omnipet")
     parser.add_argument("--version", action="version", version=f"omnipet {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -55,6 +74,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     approve.add_argument("--note")
     approve.add_argument("--repo-root", type=Path, default=Path.cwd())
     qa = commands.add_parser("qa")
+    qa_resolve = commands.add_parser("qa-resolve")
+    qa_resolve.add_argument("pet_id")
+    qa_resolve.add_argument("--report", required=True)
+    qa_resolve.add_argument("--verdict-file", required=True, type=Path)
+    qa_resolve.add_argument("--repo-root", type=Path, default=Path.cwd())
     qa.add_argument("pet_id")
     qa.add_argument("--stage", required=True, choices=("base", "standard-rows", "directions", "package"))
     qa.add_argument("--verdict-file", type=Path)
@@ -68,6 +92,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     package_mode.add_argument("--check", action="store_true")
     package_mode.add_argument("--recover", action="store_true")
     package.add_argument("--repo-root", type=Path, default=Path.cwd())
+    public_release = commands.add_parser("release")
+    release_commands = public_release.add_subparsers(
+        dest="release_command", required=True
+    )
+    release_export = release_commands.add_parser("export")
+    release_export.add_argument("pet_id")
+    release_export.add_argument("--output", required=True, type=Path)
+    release_export.add_argument("--repo-root", type=Path, default=Path.cwd())
+    release_verify = release_commands.add_parser("verify")
+    release_verify.add_argument("bundle_directory", type=Path)
+    repair = commands.add_parser("repair")
+    repair.add_argument("pet_id")
+    repair.add_argument("--job", required=True)
+    repair.add_argument("--reason", required=True)
+    repair.add_argument("--repo-root", type=Path, default=Path.cwd())
+    guide = commands.add_parser("guide")
+    guide_commands = guide.add_subparsers(dest="guide_command", required=True)
+    guide_add = guide_commands.add_parser("add")
+    guide_add.add_argument("pet_id")
+    guide_add.add_argument("--job", required=True)
+    guide_add.add_argument("--file", required=True, type=Path)
+    guide_add.add_argument("--role", required=True)
+    guide_add.add_argument(
+        "--authority",
+        required=True,
+        choices=("identity", "pose-only", "layout-only"),
+    )
+    guide_add.add_argument("--repo-root", type=Path, default=Path.cwd())
     run = commands.add_parser("run")
     run_commands = run.add_subparsers(dest="run_command", required=True)
     prepare = run_commands.add_parser("prepare")
@@ -101,6 +153,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"ok": True, "pet_id": args.pet_id, "project_root": str(destination)}, sort_keys=True))
         return 0
 
+    if args.command == "release" and args.release_command == "verify":
+        try:
+            release = verify_public_release(args.bundle_directory)
+        except (OSError, PublicReleaseError, ValueError):
+            print(
+                json.dumps({"ok": False, "error": "release verify failed"}),
+                file=sys.stderr,
+            )
+            return 1
+        print(json.dumps({
+            "ok": True,
+            "pet_id": release["petId"],
+            "version": release["version"],
+            "verified": True,
+        }, sort_keys=True))
+        return 0
+
     try:
         project = load_pet_project(args.repo_root, args.pet_id)
     except (OSError, UnicodeError, ProjectValidationError, yaml.YAMLError):
@@ -128,6 +197,85 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"ok": False, "error": "package failed"}), file=sys.stderr)
             return 1
 
+    if args.command == "release":
+        try:
+            destination = export_public_release(project, args.output)
+            release = json.loads(
+                (destination / "release.json").read_text(encoding="utf-8")
+            )
+            print(json.dumps({
+                "ok": True,
+                "pet_id": project.pet_id,
+                "version": release["version"],
+                "output": str(destination),
+            }, sort_keys=True))
+            return 0
+        except (OSError, PublicReleaseError, ValueError):
+            print(
+                json.dumps({"ok": False, "error": "release export failed"}),
+                file=sys.stderr,
+            )
+            return 1
+
+    if args.command == "qa-resolve":
+        try:
+            run_dir = (
+                project.repository_root / ".omnipet/runs" / project.pet_id
+            )
+            resolution = create_warning_resolution(
+                run_dir, args.report, args.verdict_file
+            )
+            print(json.dumps({
+                "ok": True,
+                "pet_id": project.pet_id,
+                "report": args.report,
+                "resolution": resolution.relative_to(run_dir).as_posix(),
+            }, sort_keys=True))
+            return 0
+        except (OSError, ResolutionError, ValueError):
+            print(
+                json.dumps({"ok": False, "error": "qa resolve failed"}),
+                file=sys.stderr,
+            )
+            return 1
+
+    if args.command == "repair":
+        try:
+            result = repair_project_job(
+                project, args.job, reason=args.reason
+            )
+            print(json.dumps({
+                "ok": True,
+                "pet_id": project.pet_id,
+                "repaired_job": result.repaired_job,
+                "invalidated_jobs": list(result.invalidated_jobs),
+                "invalidated_stages": list(result.invalidated_stages),
+                "archive": result.archive_path,
+            }, sort_keys=True))
+            return 0
+        except Exception:
+            print(json.dumps({"ok": False, "error": "repair failed"}), file=sys.stderr)
+            return 1
+
+    if args.command == "guide":
+        try:
+            record = add_generation_guide(
+                project,
+                args.job,
+                args.file,
+                role=args.role,
+                authority=args.authority,
+            )
+            print(json.dumps({
+                "ok": True,
+                "pet_id": project.pet_id,
+                "guide": record,
+            }, sort_keys=True))
+            return 0
+        except (OSError, UnicodeError, ValueError):
+            print(json.dumps({"ok": False, "error": "guide add failed"}), file=sys.stderr)
+            return 1
+
     if args.command in {"hatch", "approve", "qa", "status"}:
         try:
             if args.command == "hatch":
@@ -148,10 +296,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state = None
             if state is not None:
                 payload["workflow_state"] = state.state
+                if payload.get("blocked") is not None:
+                    payload["blocked"] = dict(payload["blocked"])
+                    payload["blocked"].pop("diagnostic", None)
             print(json.dumps(payload, sort_keys=True))
             return 0 if payload["workflow_state"] != "blocked" else 1
         except Exception:
-            print(json.dumps({"ok": False, "error": f"{args.command} failed"}), file=sys.stderr)
+            print(
+                json.dumps({"ok": False, "error": _WORKFLOW_ERRORS[args.command]}),
+                file=sys.stderr,
+            )
             return 1
 
     if args.command == "checkpoint":

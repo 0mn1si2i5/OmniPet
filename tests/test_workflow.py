@@ -6,6 +6,7 @@ import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from omnipet.approvals import (
@@ -16,7 +17,9 @@ from omnipet.approvals import (
     load_approvals,
 )
 from omnipet.checkpoint import restore_checkpoint
+from omnipet.package import PackageError, check_package
 from omnipet.project import load_pet_project
+from omnipet.review_resolution import create_warning_resolution
 from omnipet.run import EXPECTED_JOB_IDS
 from omnipet.workflow import (
     WorkflowError,
@@ -69,6 +72,103 @@ class ApprovalWorkflowTests(unittest.TestCase):
         self.assertEqual(refresh_workflow(self.run_dir).state, "awaiting_package_approval")
         approve_workflow_stage(self.run_dir, "package")
         self.assertEqual(refresh_workflow(self.run_dir).state, "awaiting_package_approval")
+
+    def test_stale_warning_resolution_truncates_package_approval(self):
+        self._complete("base")
+        self._stage_evidence("base")
+        refresh_workflow(self.run_dir)
+        approve_workflow_stage(self.run_dir, "base")
+        for job_id in EXPECTED_JOB_IDS[1:10]:
+            self._complete(job_id)
+        self._stage_evidence("standard-rows")
+        refresh_workflow(self.run_dir)
+        approve_workflow_stage(self.run_dir, "standard-rows")
+        for job_id in EXPECTED_JOB_IDS[10:]:
+            self._complete(job_id)
+        self._stage_evidence("directions")
+        refresh_workflow(self.run_dir)
+        approve_workflow_stage(self.run_dir, "directions")
+        self._stage_evidence("package")
+
+        report = self.run_dir / "qa/package-generated/continuity.json"
+        evidence = self.run_dir / "qa/package-generated/direction-sheet.png"
+        atlas = self.run_dir / "final/spritesheet-extended.webp"
+        warning_id = "direction-continuity:pair-000-to-022.5:center-shift-high"
+        report.write_text(json.dumps({
+            "ok": True,
+            "atlasSha256": self._sha("final/spritesheet-extended.webp"),
+            "reviewRequired": True,
+            "warnings": [{
+                "id": warning_id,
+                "text": "000->022.5 center shift is high",
+            }],
+        }), encoding="utf-8")
+        verdict = self.root / "continuity-resolution.json"
+
+        def resolve():
+            verdict.write_text(json.dumps({
+                "schema_version": 1,
+                "warning_ids": [warning_id],
+                "reviewer": "release-reviewer",
+                "disposition": "pass",
+                "note": "The transition is visually intentional.",
+                "visual_evidence": [{
+                    "path": "qa/package-generated/direction-sheet.png",
+                    "sha256": self._sha(
+                        "qa/package-generated/direction-sheet.png"
+                    ),
+                }],
+            }), encoding="utf-8")
+            create_warning_resolution(
+                self.run_dir,
+                "qa/package-generated/continuity.json",
+                verdict,
+            )
+
+        resolve()
+        self.assertEqual(
+            refresh_workflow(self.run_dir).state,
+            "awaiting_package_approval",
+        )
+        approve_workflow_stage(self.run_dir, "package")
+        self.assertEqual(
+            [record.stage for record in load_approvals(self.run_dir)],
+            ["base", "standard-rows", "directions", "package"],
+        )
+
+        originals = {
+            report: report.read_bytes(),
+            evidence: evidence.read_bytes(),
+            atlas: atlas.read_bytes(),
+        }
+        mutations = {
+            "report": lambda: report.write_text(json.dumps({
+                **json.loads(originals[report]),
+                "mutated": True,
+            }), encoding="utf-8"),
+            "evidence": lambda: evidence.write_bytes(b"changed evidence"),
+            "atlas": lambda: atlas.write_bytes(b"changed atlas"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                mutate()
+                self.assertEqual(
+                    refresh_workflow(self.run_dir).state,
+                    "awaiting_package_approval",
+                )
+                self.assertEqual(
+                    [record.stage for record in load_approvals(self.run_dir)],
+                    ["base", "standard-rows", "directions"],
+                )
+                with self.assertRaises(PackageError):
+                    check_package(SimpleNamespace(
+                        pet_id="pet",
+                        repository_root=self.root,
+                    ))
+                for path, content in originals.items():
+                    path.write_bytes(content)
+                resolve()
+                approve_workflow_stage(self.run_dir, "package")
 
     def test_approval_schema_hashes_timestamp_note_and_tamper_are_strict(self):
         self._complete("base")
@@ -180,7 +280,8 @@ class ApprovalWorkflowTests(unittest.TestCase):
         blocked = mark_blocked(self.run_dir, code="manual-review", job="base", evidence="qa/base.txt")
         self.assertEqual(blocked.state, "blocked")
         self.assertEqual(load_workflow(self.run_dir).blocked, {
-            "code": "manual-review", "job": "base", "evidence": "qa/base.txt"
+            "code": "manual-review", "job": "base", "evidence": "qa/base.txt",
+            "diagnostic": None,
         })
         self._complete("base")
         self._stage_evidence("base")
@@ -197,7 +298,10 @@ class ApprovalWorkflowTests(unittest.TestCase):
         state = refresh_workflow(self.run_dir)
 
         self.assertEqual(state.state, "blocked")
-        self.assertEqual(state.blocked, {"code": "job-failed", "job": "base", "evidence": None})
+        self.assertEqual(state.blocked, {
+            "code": "job-failed", "job": "base", "evidence": None,
+            "diagnostic": None,
+        })
         manifest["jobs"][0]["status"] = "pending"
         self._save_manifest(manifest)
         self.assertEqual(refresh_workflow(self.run_dir).state, "blocked")
@@ -546,8 +650,9 @@ class CheckpointWorkflowMigrationTests(unittest.TestCase):
 
     def _external_clone(self):
         source = Path(__file__).resolve().parents[4] / ("OmniPet-" + "Su" + "Shi")
-        if not source.is_dir():
-            self.skipTest("external pet sibling checkout is unavailable")
+        required = (source / "pet.yaml", source / "checkpoint" / "checkpoint.json")
+        if not source.is_dir() or not all(path.is_file() for path in required):
+            self.skipTest("external production pet fixture is unavailable")
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         clone = Path(temporary.name).resolve() / "external-pet"

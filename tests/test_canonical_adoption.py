@@ -32,6 +32,12 @@ class CanonicalAdoptionTests(unittest.TestCase):
             "The right hand may rest on, steady, or release the secured brush as the state requires.\n",
             encoding="utf-8",
         )
+        (pet_root / "README.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (pet_root / "README.zh-CN.md").write_text("# 示例宠物\n", encoding="utf-8")
+        (pet_root / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         (pet_root / "references" / "portrait.jpg").write_bytes(b"portrait")
         self._write_png(pet_root / "approved" / "canonical-base.png", (1, 2, 3, 255))
         (pet_root / "pet.yaml").write_text(VALID_PET_YAML, encoding="utf-8")

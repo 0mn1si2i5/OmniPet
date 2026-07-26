@@ -1,17 +1,5 @@
-# Security Policy
+# Security
 
-## Supported Versions
+For the current alpha, report security-sensitive issues through GitHub private vulnerability reporting. Please include a minimal reproduction and remove keys, private images, prompts, and provider responses.
 
-The current alpha `0.1.0a1` is the only supported version. Alpha support means reports are assessed on a best-effort basis; compatibility fixes may require a new prerelease.
-
-## Reporting A Vulnerability
-
-Use the repository's GitHub **Private vulnerability reporting** feature. Do not open a public issue or discussion. If that feature is unavailable, contact the project maintainers privately through GitHub repository moderation rather than disclosing details publicly. No public email address is designated.
-
-Include the affected version, platform, reproduction steps, impact, and a minimal sanitized example. Remove API keys, personal data, proprietary prompts, reference images, absolute user paths, and raw provider responses.
-
-## Security Scope
-
-High-priority concerns include API key exposure; path traversal, symlink, archive, or unsafe file-promotion behavior; provider request leakage or unexpected network access; unbounded image or manifest processing; package and checkpoint integrity; and bypasses of approval or QA gates.
-
-OmniPet accepts `OPENAI_API_KEY` only through the process environment and supports only its built-in provider path. Project validation is bounded but is not a general secret scanner. Rotate a key immediately through the provider if exposure is suspected.
+`OPENAI_API_KEY` is read from the process environment. If it is exposed, rotate it with the provider. Path handling, package integrity, and unexpected provider requests are in scope; ordinary product feedback belongs in an issue.

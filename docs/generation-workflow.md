@@ -31,8 +31,24 @@ The installed package must contain both `pet.json` and `spritesheet.webp`. Verif
 
 Report each stage with artifact paths, passed or failed gates, and the next bounded action. Never claim visual success without inspecting its QA artifact.
 
+## Production Package And Public Release
+
+The production project, portable checkpoint, `dist/`, and public release bundle are separate objects. The project preserves durable creator inputs and accepted decisions. The checkpoint restores accepted workflow state. `dist/` holds the validated package after every hard gate passes. None of these should be copied wholesale into a public catalog.
+
+After package approval and a passing package check, export the sanitized bundle:
+
+```text
+omnipet package my-pet --check
+omnipet release export my-pet --output release-work/my-pet-1.0.0
+omnipet release verify release-work/my-pet-1.0.0
+```
+
+Export uses a closed allowlist, binds every public file by SHA-256 in `release.json`, verifies the staged bundle, and installs it atomically. Verify is clean-room: it reads only the public release bundle and needs neither `OPENAI_API_KEY` nor the production project. Import that verified bundle into the public `OmniPets` catalog; do not publish prompts, references, checkpoints, reviewer source material, provider metadata, or `.omnipet` state.
+
 ## Retention And Recovery
 
 Promote only approved identity assets, selected QA evidence, and verified package files. Keep rejected candidates, preflights, chroma experiments, generated guides, frame caches, and logs in ignored run state.
 
 Use `omnipet status my-pet` after interruption. Correct deterministic failures before regenerating visual work. Repeated root failures require a strategy change, not prompt churn. Never clean up a source until its durable promotion and package checks pass.
+
+For a completed or failed visual job that must be replaced, use `omnipet repair my-pet --job <job-id> --reason <text>`. Repair archives the selected job atomically and invalidates dependent QA, approvals, package evidence, and delivery while preserving unrelated upstream accepted work. Re-run only the bounded downstream workflow reported by status.

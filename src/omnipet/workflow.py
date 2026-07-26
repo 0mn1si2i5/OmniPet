@@ -14,8 +14,10 @@ from omnipet.approvals import (
     ApprovalError,
     _approve_stage_unlocked,
     invalidate_stale_approvals,
+    load_approvals,
     required_artifacts,
 )
+from omnipet.diagnostics import SafeDiagnostic
 from omnipet.security import contains_credential_like_text
 
 
@@ -42,7 +44,7 @@ class WorkflowError(RuntimeError):
 @dataclass(frozen=True)
 class WorkflowState:
     state: str
-    blocked: dict[str, str | None] | None = None
+    blocked: dict[str, Any] | None = None
 
 
 def load_workflow(run_dir: Path) -> WorkflowState:
@@ -79,6 +81,9 @@ def _refresh_workflow_unlocked(run_dir: Path) -> WorkflowState:
     if current.blocked is not None:
         return current
     try:
+        had_package_approval = any(
+            record.stage == "package" for record in load_approvals(run_dir)
+        )
         approvals = invalidate_stale_approvals(run_dir)
         approved = {record.stage for record in approvals}
         jobs = _jobs(run_dir)
@@ -86,7 +91,10 @@ def _refresh_workflow_unlocked(run_dir: Path) -> WorkflowState:
         if failed is not None:
             result = WorkflowState(
                 "blocked",
-                {"code": "job-failed", "job": failed["id"], "evidence": None},
+                {
+                    "code": "job-failed", "job": failed["id"],
+                    "evidence": None, "diagnostic": None,
+                },
             )
             _write_workflow_unlocked(run_dir, result)
             return result
@@ -114,7 +122,10 @@ def _refresh_workflow_unlocked(run_dir: Path) -> WorkflowState:
             state = "generating_directions"
         elif "directions" not in approved:
             state = "awaiting_directions_approval"
-        elif not _evidence_present(run_dir, "package"):
+        elif (
+            not had_package_approval
+            and not _evidence_present(run_dir, "package")
+        ):
             state = "building_package"
         elif "package" not in approved:
             state = "awaiting_package_approval"
@@ -163,14 +174,27 @@ def _approve_workflow_stage_unlocked(run_dir: Path, stage: str, *, note: str | N
     return _refresh_workflow_unlocked(run_dir)
 
 
-def mark_blocked(run_dir: Path, *, code: str, job: str | None, evidence: str | None) -> WorkflowState:
+def mark_blocked(
+    run_dir: Path, *, code: str, job: str | None, evidence: str | None,
+    diagnostic: SafeDiagnostic | None = None,
+) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
-        return _mark_blocked_unlocked(run_dir, code=code, job=job, evidence=evidence)
+        return _mark_blocked_unlocked(
+            run_dir, code=code, job=job, evidence=evidence, diagnostic=diagnostic
+        )
 
 
-def _mark_blocked_unlocked(run_dir: Path, *, code: str, job: str | None, evidence: str | None) -> WorkflowState:
-    blocked = {"code": code, "job": job, "evidence": evidence}
+def _mark_blocked_unlocked(
+    run_dir: Path, *, code: str, job: str | None, evidence: str | None,
+    diagnostic: SafeDiagnostic | None = None,
+) -> WorkflowState:
+    blocked = {
+        "code": code,
+        "job": job,
+        "evidence": evidence,
+        "diagnostic": diagnostic.to_dict() if diagnostic is not None else None,
+    }
     try:
         _validate_blocked(blocked)
     except ValueError:
@@ -256,7 +280,9 @@ def mark_package_complete(run_dir: Path) -> WorkflowState:
 
 
 def _validate_blocked(value: Any) -> None:
-    if not isinstance(value, dict) or set(value) != _BLOCKED_KEYS:
+    if not isinstance(value, dict) or set(value) not in {
+        frozenset(_BLOCKED_KEYS), frozenset(_BLOCKED_KEYS | {"diagnostic"})
+    }:
         raise ValueError("blocked schema is invalid")
     code, job, evidence = value.get("code"), value.get("job"), value.get("evidence")
     if not isinstance(code, str) or not code.strip() or contains_credential_like_text(code):
@@ -273,6 +299,8 @@ def _validate_blocked(value: Any) -> None:
             or contains_credential_like_text(evidence)
         ):
             raise ValueError("blocked evidence is invalid")
+    if value.get("diagnostic") is not None:
+        SafeDiagnostic.from_dict(value["diagnostic"])
 
 
 def _write_workflow_unlocked(run_dir: Path, state: WorkflowState) -> None:

@@ -2,9 +2,11 @@
 
 ## Boundaries
 
-OmniPet owns pet validation, built-in OpenAI generation, safe file promotion, run preparation, resumability, approvals, packaging, and CLI reporting. Durable data lives in `pets/<pet-id>`; ignored execution state lives in `.omnipet/runs/<pet-id>`.
+OmniPet owns production project validation, built-in OpenAI generation, safe file promotion, run preparation, resumability, approvals, transactional repair, packaging, public release export and clean-room verification, and CLI reporting. Durable data lives in `pets/<pet-id>`; ignored execution state lives in `.omnipet/runs/<pet-id>`.
 
 The built-in hatch engine owns row definitions, layout guides, extraction, inspection, atlas assembly, direction QA helpers, chroma despill, and v2 validation. Typed dataclass APIs call attributed vendored functions in process. They translate execution failures into hatch API errors, accept regular source files, reject symlink output paths, and never depend on user-installed engine paths.
+
+Official installable pet assets live in the separate public `OmniPets` catalog. OmniPet does not own or bundle that binary catalog. A private production repository may use this engine for durable projects, but neither its source material nor its runtime state crosses the public boundary.
 
 ## Image Generation
 
@@ -20,6 +22,17 @@ Durable project files include the manifest, brief, references, approved canonica
 
 Promotion from run state to a durable directory is explicit, validated, and atomic. Paths must remain beneath declared roots; symlinks, traversal, and destination overlap are rejected. Configuration validation is bounded and closed-schema, but it is not an exhaustive secret detector; credentials remain prohibited by contract.
 
+Four related objects stay distinct:
+
+1. The **production project** is the durable creator workspace under `pets/<pet-id>/`.
+2. A **portable checkpoint** is a hash-bound accepted-state snapshot for restoring that project without copying ordinary runtime.
+3. **`dist/`** is the production project's validated engine package output.
+4. A **public release bundle** is the sanitized closed allowlist created from approved package output. It contains no production project, checkpoint, or run state.
+
 ## State Machine
 
 The workflow advances one bounded action at a time. A canonical base approval pause precedes standard generation; standard-row QA and approval precede direction generation; each direction phase pauses for review; package QA and approval precede publication. Checkpoint export stores only accepted, validated artifacts and an actionable frontier. Package only when every hard gate passes.
+
+Repair archives the selected completed or failed visual job transactionally, returns it to pending, and invalidates centrally defined downstream evidence. Generated QA remains immutable; warning resolutions bind reviewer decisions to current source and evidence hashes.
+
+After packaging, `omnipet release export` creates an allowlisted bundle beneath `release-work/` and verifies it before atomic installation. `omnipet release verify` consumes only that bundle, requires no provider credentials or production project, and is suitable for zero-trust public catalog CI.

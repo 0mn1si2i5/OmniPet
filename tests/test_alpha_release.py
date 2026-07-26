@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import tomllib
 import unittest
 
@@ -33,7 +32,7 @@ class AlphaReleaseTests(unittest.TestCase):
         )
         self.assertEqual(
             metadata["dependencies"],
-            ["openai>=2.46,<3", "Pillow>=12,<13", "PyYAML>=6,<7"],
+            ["openai>=2.46,<3", "packaging>=24.2,<27", "Pillow>=12,<13", "PyYAML>=6,<7"],
         )
         self.assertEqual(
             metadata["optional-dependencies"]["dev"],
@@ -50,128 +49,6 @@ class AlphaReleaseTests(unittest.TestCase):
         self.assertNotIn("Operating System :: OS " + "Independent", metadata["classifiers"])
         self.assertTrue({"animated-pets", "sprite", "openai"}.issubset(metadata["keywords"]))
         self.assertIn('__version__ = "0.1.0a1"', (REPO_ROOT / "src/omnipet/__init__.py").read_text())
-
-    def test_readme_covers_alpha_operation_and_risk_contract(self):
-        text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        folded = text.casefold()
-
-        for phrase in (
-            "alpha",
-            "pip install omnipet",
-            "OPENAI_API_KEY",
-            "built-in hatch",
-            "what works",
-            "approval",
-            "does not retry",
-            "cost",
-            "privacy",
-            "project structure",
-            "recovery",
-            "troubleshooting",
-            "current limitations",
-            "roadmap",
-            "OmniPet-" + "Su" + "Shi",
-            "release is blocked pending rights confirmation",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase.casefold(), folded)
-        for command in (
-            "omnipet pet init",
-            "omnipet pet validate",
-            "omnipet hatch",
-            "omnipet approve",
-            "omnipet qa",
-            "omnipet package",
-            "omnipet checkpoint export",
-        ):
-            self.assertIn(command, text)
-        self.assertNotIn("co" + "dex", folded)
-        self.assertNotIn("plug" + "in", folded)
-        for block in re.findall(r"```(?:sh|bash)\n(.*?)```", text, re.DOTALL):
-            self.assertNotIn("<", block)
-            self.assertNotIn(">", block)
-            for line in block.splitlines():
-                if line.startswith("omnipet "):
-                    self.assertIn("my-pet", line)
-
-        self.assertIn(
-            "omnipet qa my-pet --stage package --verdict-file package-verdict.json",
-            text,
-        )
-        self.assertIn("docs/package-review.md", text)
-        package_review = (REPO_ROOT / "docs/package-review.md").read_text(encoding="utf-8")
-        for phrase in (
-            "direction_evidence",
-            "final_visual",
-            "sha256",
-            "blind-sheet.png",
-            "final direction semantics",
-            "must be supplied by reviewers",
-        ):
-            self.assertIn(phrase, package_review)
-
-    def test_public_docs_describe_only_built_in_current_workflow(self):
-        paths = (
-            REPO_ROOT / "docs/architecture.md",
-            REPO_ROOT / "docs/pet-project-format.md",
-            REPO_ROOT / "docs/generation-workflow.md",
-        )
-        text = "\n".join(path.read_text(encoding="utf-8") for path in paths).casefold()
-
-        for phrase in (
-            "built-in hatch",
-            "approval pause",
-            "no automatic retry",
-            "checkpoint",
-            "package only when every hard gate passes",
-        ):
-            self.assertIn(phrase, text)
-        self.assertNotIn("plug" + "in", text)
-        self.assertNotIn("external " + "hatch", text)
-        workflow = (REPO_ROOT / "docs/generation-workflow.md").read_text(encoding="utf-8")
-        self.assertNotIn("omnipet run status", workflow)
-        self.assertIn("omnipet status my-pet", workflow)
-
-    def test_release_and_community_documents_are_complete(self):
-        required = (
-            "CHANGELOG.md",
-            "CONTRIBUTING.md",
-            "SECURITY.md",
-            "CODE_OF_CONDUCT.md",
-            ".github/ISSUE_TEMPLATE/bug_report.yml",
-            ".github/ISSUE_TEMPLATE/feature_request.yml",
-            ".github/pull_request_template.md",
-        )
-        for relative in required:
-            with self.subTest(path=relative):
-                self.assertTrue((REPO_ROOT / relative).is_file())
-
-        changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        self.assertIn("Keep a Changelog", changelog)
-        self.assertIn("## [Unreleased]", changelog)
-        self.assertIn("## [0.1.0a1] - 2026-07-22", changelog)
-
-        contributing = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8").casefold()
-        for phrase in (".[dev]", "scripts/test-all.sh", "test-driven development", "notice", "paid tests"):
-            self.assertIn(phrase, contributing)
-
-        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8").casefold()
-        for phrase in ("private vulnerability reporting", "0.1.0a1", "api key", "path", "provider"):
-            self.assertIn(phrase, security)
-        self.assertIsNone(re.search(r"[\w.+-]+@[\w.-]+\.[a-z]{2,}", security))
-
-        conduct = (REPO_ROOT / "CODE_OF_CONDUCT.md").read_text(encoding="utf-8")
-        self.assertIn("Contributor Covenant Code of Conduct", conduct)
-        self.assertIn("version 2.1", conduct.casefold())
-        self.assertIn("Enforcement Guidelines", conduct)
-        self.assertIn("project maintainers", conduct.casefold())
-        self.assertNotIn("[INSERT", conduct)
-
-        for name in ("bug_report.yml", "feature_request.yml"):
-            form = load_workflow(REPO_ROOT / ".github/ISSUE_TEMPLATE" / name)
-            self.assertIn("name", form)
-            self.assertIn("description", form)
-            self.assertIn("body", form)
 
     def test_ci_matrix_build_and_smoke_are_offline(self):
         path = REPO_ROOT / ".github/workflows/ci.yml"

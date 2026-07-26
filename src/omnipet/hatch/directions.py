@@ -140,7 +140,8 @@ def make_direction_blind_qa_sheet(config: BlindQaSheetConfig) -> BlindSheetResul
 def measure_direction_continuity(config: ContinuityConfig) -> ReportResult:
     if config.diff_outlier_ratio <= 0 or config.center_delta_warning < 0 or config.area_ratio_warning < 1:
         raise ValueError("continuity thresholds are out of range")
-    atlas = _atlas(config.atlas)
+    atlas_path = _path(config.atlas, "atlas", file=True)
+    atlas = _atlas(atlas_path)
     cells = [continuity_vendor.cell_from_atlas(atlas, index) for index in range(16)]
     pairs = [{"from": label, "to": continuity_vendor.LOOK_DIRECTION_LABELS[(index + 1) % 16], **continuity_vendor.pair_metric(cells[index], cells[(index + 1) % 16])} for index, label in enumerate(continuity_vendor.LOOK_DIRECTION_LABELS)]
     diffs = [float(pair["diffPixels"]) for pair in pairs]
@@ -149,17 +150,37 @@ def measure_direction_continuity(config: ContinuityConfig) -> ReportResult:
         found = continuity_vendor.transparent_hole_rows(cell)
         if found:
             holes.append({"direction": label, "holes": found})
-            warnings.append(f"{label} has transparent interior hole rows")
+            warnings.append({
+                "id": f"direction-continuity:direction-{label}:transparent-interior-hole-rows",
+                "text": f"{label} has transparent interior hole rows",
+            })
     for index, pair in enumerate(pairs):
         label = f"{pair['from']}->{pair['to']}"
         neighbors = statistics.mean([diffs[(index - 1) % 16], diffs[(index + 1) % 16]])
         if neighbors and float(pair["diffPixels"]) > neighbors * config.diff_outlier_ratio:
-            warnings.append(f"{label} diff is a local outlier")
+            warnings.append({
+                "id": f"direction-continuity:pair-{pair['from']}-to-{pair['to']}:diff-local-outlier",
+                "text": f"{label} diff is a local outlier",
+            })
         if isinstance(pair["centerDelta"], float) and pair["centerDelta"] > config.center_delta_warning:
-            warnings.append(f"{label} center shift is high")
+            warnings.append({
+                "id": f"direction-continuity:pair-{pair['from']}-to-{pair['to']}:center-shift-high",
+                "text": f"{label} center shift is high",
+            })
         if isinstance(pair["areaRatio"], float) and pair["areaRatio"] > config.area_ratio_warning:
-            warnings.append(f"{label} sprite area ratio is high")
-    payload = {"ok": True, "reviewRequired": bool(warnings), "medianDiffPixels": continuity_vendor.median(diffs), "warnings": warnings, "alphaHoles": holes, "pairs": pairs}
+            warnings.append({
+                "id": f"direction-continuity:pair-{pair['from']}-to-{pair['to']}:sprite-area-ratio-high",
+                "text": f"{label} sprite area ratio is high",
+            })
+    payload = {
+        "ok": True,
+        "atlasSha256": hashlib.sha256(atlas_path.read_bytes()).hexdigest(),
+        "reviewRequired": bool(warnings),
+        "medianDiffPixels": continuity_vendor.median(diffs),
+        "warnings": warnings,
+        "alphaHoles": holes,
+        "pairs": pairs,
+    }
     output = safe_output(config.json_out, "json_out")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

@@ -13,6 +13,7 @@ from typing import Any, Mapping
 import openai
 from PIL import Image, UnidentifiedImageError
 
+from omnipet.diagnostics import SafeDiagnostic, openai_diagnostic
 from omnipet.generation import GeneratedImage, ImageRequest
 
 
@@ -26,25 +27,30 @@ _SIZES = {("1:1", "1K"): "1024x1024", ("21:9", "2K"): "1536x1024"}
 class OpenAIImageError(RuntimeError):
     """Base class for sanitized image generation failures."""
 
+    diagnostic: SafeDiagnostic
+
 
 class OpenAIValidationError(OpenAIImageError):
     """Local validation failed before an API request was sent."""
 
-    def __init__(self) -> None:
+    def __init__(self, diagnostic: SafeDiagnostic | None = None) -> None:
+        self.diagnostic = diagnostic or SafeDiagnostic("local-validation")
         super().__init__("OpenAI image request validation failed")
 
 
 class OpenAIRequestError(OpenAIImageError):
     """The API request failed."""
 
-    def __init__(self) -> None:
+    def __init__(self, diagnostic: SafeDiagnostic | None = None) -> None:
+        self.diagnostic = diagnostic or SafeDiagnostic("provider-request")
         super().__init__("OpenAI image request failed")
 
 
 class OpenAIResponseError(OpenAIImageError):
     """The response or output could not be safely processed."""
 
-    def __init__(self) -> None:
+    def __init__(self, diagnostic: SafeDiagnostic | None = None) -> None:
+        self.diagnostic = diagnostic or SafeDiagnostic("provider-response")
         super().__init__("OpenAI image response failed")
 
 
@@ -89,7 +95,15 @@ class OpenAIImageGenerator:
 
             try:
                 if self.client is None:
-                    client = build_client(self.api_key or get_api_key())
+                    api_key = self.api_key
+                    if api_key is None:
+                        try:
+                            api_key = get_api_key()
+                        except ValueError:
+                            raise OpenAIValidationError(
+                                SafeDiagnostic("missing-credentials")
+                            ) from None
+                    client = build_client(api_key)
                 else:
                     with_options = getattr(self.client, "with_options", None)
                     if not callable(with_options):
@@ -101,6 +115,8 @@ class OpenAIImageGenerator:
                     operation = getattr(images_api, "edit" if edit else "generate", None)
                     if not callable(operation):
                         raise ValueError("configured client lacks Images operation")
+            except OpenAIValidationError:
+                raise
             except Exception:
                 raise OpenAIValidationError() from None
 
@@ -120,8 +136,8 @@ class OpenAIImageGenerator:
                     response = client.images.edit(image=image, **parameters)
                 else:
                     response = client.images.generate(**parameters)
-            except Exception:
-                raise OpenAIRequestError() from None
+            except Exception as error:
+                raise OpenAIRequestError(openai_diagnostic(error)) from None
 
             try:
                 image_data, width, height = _extract_png(response)

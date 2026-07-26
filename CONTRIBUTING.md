@@ -1,10 +1,10 @@
 # Contributing
 
-OmniPet is alpha software. Open an issue before large changes so scope and compatibility expectations are explicit.
+OmniPet is an early project. Keep changes small and describe the user-visible behavior they change.
 
-## Development Setup
+## Local development
 
-Requires Python 3.12 or newer.
+Python 3.12 or newer is required:
 
 ```sh
 python -m venv .venv
@@ -12,16 +12,6 @@ python -m venv .venv
 scripts/test-all.sh
 ```
 
-The suite uses `unittest` and must run without an API key or network access. Do not add paid tests, live provider tests, or tests that read user configuration. Use temporary directories and deterministic fixtures.
+Tests cover executable behavior and structured formats. Update documentation when behavior changes, but prose is not a test contract.
 
-## Test-Driven Development
-
-Use test-driven development for behavior changes: write one focused failing test, run it and confirm the expected failure, implement the minimum change, then run the focused and full suites. Documentation and workflow contracts belong in repository tests where they can regress.
-
-## Vendored Code
-
-Do not edit `src/omnipet/_vendor/hatch` casually. Preserve the local `MANIFEST.json` hashes and attribution. Every vendor modification must be recorded as modified in the manifest and explained in `src/omnipet/_vendor/hatch/VENDORING.md`. Review and update the root `NOTICE`, vendored `NOTICE`, license files, package-data rules, and parity tests when importing or modifying vendor material.
-
-## Pull Requests
-
-Keep changes focused, describe the red-green evidence, run `scripts/test-all.sh`, and include documentation for public behavior. Never include credentials, private pet assets, generated run state, or provider responses.
+Do not commit API keys, private pet assets, provider responses, or `.omnipet` runtime state. Changes to vendored Hatch code also need its manifest and attribution updated.

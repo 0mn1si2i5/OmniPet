@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,13 +9,30 @@ from types import MappingProxyType
 from typing import Any
 
 import yaml
-import warnings
+from packaging.licenses import InvalidLicenseExpression, canonicalize_license_expression
 
 from omnipet.security import is_credential_like_key
 
 
 class ProjectValidationError(ValueError):
     """Raised when durable pet project data violates the project contract."""
+
+
+_RELEASE_KEYS = {
+    "version",
+    "asset_license",
+    "readme",
+    "readme_zh_cn",
+    "asset_license_file",
+    "preview_source",
+}
+_SEMANTIC_VERSION = re.compile(
+    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*))"
+    r"(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*)))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+_SIMPLE_SPDX_LICENSE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]*")
 
 
 @dataclass(frozen=True)
@@ -47,6 +66,12 @@ class PetProject:
     hatch_engine_requirements: Mapping[str, Any]
     spritesheet_path: Path
     manifest_path: Path
+    release_version: str
+    asset_license: str
+    release_readme_path: Path
+    release_readme_zh_cn_path: Path | None
+    asset_license_path: Path
+    preview_source_path: Path
     canonical_base_path: Path | None
 
     @property
@@ -113,6 +138,7 @@ def load_pet_project(repo_root: Path, pet_id_or_path: str | Path) -> PetProject:
     image_generation, image_generation_deprecated = _image_generation_config(data)
     hatch_engine = _required_mapping(data, "hatch_engine")
     package = _required_mapping(data, "package")
+    release = _required_mapping(data, "release")
     _required_string(style.get("preset"), "style preset")
     style_notes = style.get("notes", "")
     if not isinstance(style_notes, str):
@@ -151,6 +177,45 @@ def load_pet_project(repo_root: Path, pet_id_or_path: str | Path) -> PetProject:
 
     spritesheet_path = _project_path(pet_root, package.get("spritesheet"))
     package_manifest_path = _project_path(pet_root, package.get("manifest"))
+    required_release_keys = _RELEASE_KEYS - {"readme_zh_cn"}
+    if (
+        not set(release).issubset(_RELEASE_KEYS)
+        or not required_release_keys.issubset(release)
+    ):
+        raise ProjectValidationError("invalid release metadata")
+    release_version = _required_string(release.get("version"), "release version")
+    if _SEMANTIC_VERSION.fullmatch(release_version) is None:
+        raise ProjectValidationError("invalid release version")
+    asset_license = _required_string(release.get("asset_license"), "asset license")
+    if (
+        _SIMPLE_SPDX_LICENSE_ID.fullmatch(asset_license) is None
+        or asset_license.lower().startswith("licenseref-")
+    ):
+        raise ProjectValidationError("invalid SPDX asset license")
+    try:
+        asset_license = str(canonicalize_license_expression(asset_license))
+    except InvalidLicenseExpression as error:
+        raise ProjectValidationError("invalid SPDX asset license") from error
+    release_readme_path = _project_path(
+        pet_root,
+        release.get("readme"),
+        must_exist=True,
+    )
+    release_readme_zh_cn_path = (
+        None
+        if "readme_zh_cn" not in release
+        else _project_path(
+            pet_root,
+            release["readme_zh_cn"],
+            must_exist=True,
+        )
+    )
+    asset_license_path = _project_path(
+        pet_root,
+        release.get("asset_license_file"),
+        must_exist=True,
+    )
+    preview_source_path = _project_path(pet_root, release.get("preview_source"))
     approved = data.get("approved")
     if approved is None:
         canonical_base_path = None
@@ -193,6 +258,12 @@ def load_pet_project(repo_root: Path, pet_id_or_path: str | Path) -> PetProject:
         hatch_engine_requirements=frozen_hatch_requirements,
         spritesheet_path=spritesheet_path,
         manifest_path=package_manifest_path,
+        release_version=release_version,
+        asset_license=asset_license,
+        release_readme_path=release_readme_path,
+        release_readme_zh_cn_path=release_readme_zh_cn_path,
+        asset_license_path=asset_license_path,
+        preview_source_path=preview_source_path,
         canonical_base_path=canonical_base_path,
     )
 

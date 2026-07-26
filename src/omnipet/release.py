@@ -16,7 +16,12 @@ from typing import Any, Callable
 from PIL import Image, UnidentifiedImageError
 
 from omnipet.approvals import ACCEPTED_BASE_DECISION, validate_direction_checkpoint
+from omnipet.diagnostics import SafeDiagnostic
 from omnipet.generation import GroundingImage, ImageRequest
+from omnipet.guides import (
+    clear_generation_guides,
+    load_generation_guides,
+)
 from omnipet.hatch.atlas import (
     AssembleExtendedAtlasConfig,
     ComposeAtlasConfig,
@@ -44,8 +49,8 @@ from omnipet.hatch.inspect import (
     make_contact_sheet,
     render_animation_previews,
 )
-from omnipet.openai_images import OpenAIImageGenerator
-from omnipet.package import build_package_evidence, import_package_verdict
+from omnipet.openai_images import OpenAIImageError, OpenAIImageGenerator
+from omnipet.package import PackageError, build_package_evidence, import_package_verdict
 from omnipet.project import PetProject, load_pet_project
 from omnipet.run import EXPECTED_JOB_IDS, STANDARD_JOB_IDS, prepare_run
 from omnipet.workflow import (
@@ -72,10 +77,11 @@ _EXPECTED_PROMPTS = {
 
 
 class JobGenerationError(RuntimeError):
-    def __init__(self, job_id: str, code: str):
+    def __init__(self, job_id: str, code: str, diagnostic: SafeDiagnostic):
         super().__init__("job generation failed")
         self.job_id = job_id
         self.code = code
+        self.diagnostic = diagnostic
 
 
 def init_pet_project(repo_root: Path, pet_id: str, *, standalone: Path | None = None) -> Path:
@@ -150,13 +156,33 @@ def _hatch_project_locked(
         return refresh_workflow(run_dir)
     except JobGenerationError as error:
         _fail_job(run_dir, error.job_id)
-        return mark_blocked(run_dir, code=error.code, job=error.job_id, evidence=None)
-    except Exception:
+        return mark_blocked(
+            run_dir, code=error.code, job=error.job_id, evidence=None,
+            diagnostic=error.diagnostic,
+        )
+    except Exception as error:
         active_job = _running_job(run_dir) or active_job
         if active_job is not None:
             _fail_job(run_dir, active_job)
         code = "package-build-failed" if workflow.state == "building_package" else "generation-failed"
-        return mark_blocked(run_dir, code=code, job=active_job, evidence=None)
+        diagnostic = (
+            SafeDiagnostic(
+                "deterministic-qa" if isinstance(error, PackageError) else "publication"
+            )
+            if workflow.state == "building_package"
+            else _exception_diagnostic(
+                error,
+                "deterministic-qa"
+                if workflow.state in {
+                    "generating_standard_rows", "generating_directions"
+                }
+                else "local-validation",
+            )
+        )
+        return mark_blocked(
+            run_dir, code=code, job=active_job, evidence=None,
+            diagnostic=diagnostic,
+        )
 
 
 def approve_project_stage(project: PetProject, stage: str, *, note: str | None = None) -> WorkflowState:
@@ -237,6 +263,12 @@ def reset_failed_job(project: PetProject, job_id: str) -> WorkflowState:
     run_dir = _run_dir(project)
     with _hatch_lock(project):
         return _reset_failed_job_locked(run_dir, job_id)
+
+
+def repair_project_job(project: PetProject, job_id: str, *, reason: str):
+    from omnipet.repair import repair_completed_job
+
+    return repair_completed_job(project, job_id, reason=reason)
 
 
 def _reset_failed_job_locked(run_dir: Path, job_id: str) -> WorkflowState:
@@ -380,13 +412,16 @@ def project_status(project: PetProject) -> dict[str, Any]:
             else f"omnipet hatch {selector} --clear-block"
         ),
     }
+    next_action = actions[state.state]
+    if len(next_action) > 256:
+        next_action = "none"
     return {
         "ok": True,
         "pet_id": project.pet_id,
         "run_dir": str(run_dir),
         "workflow_state": state.state,
         "direction_phase": phase,
-        "next_action": actions[state.state],
+        "next_action": next_action,
         "blocked": state.blocked,
     }
 
@@ -427,6 +462,7 @@ def _generate_base_candidate(project: PetProject, run_dir: Path, generator: Any)
         "canvas": {"aspect_ratio": "1:1", "image_size": "1K"},
     })
     _set_job_status(run_dir, "base", "pending")
+    clear_generation_guides(run_dir, "base")
     return refresh_workflow(run_dir)
 
 
@@ -478,8 +514,13 @@ def _generate_standard_rows(project: PetProject, run_dir: Path, generator: Any) 
         try:
             source = _generate_source(project, run_dir, generator, job_id)
             _stage_generated_row(run_dir, job_id, source)
-        except Exception:
-            raise JobGenerationError(job_id, "generation-failed") from None
+        except JobGenerationError:
+            raise
+        except Exception as error:
+            raise JobGenerationError(
+                job_id, "generation-failed",
+                _exception_diagnostic(error, "deterministic-qa"),
+            ) from None
 
 
 def _generate_direction_action(project: PetProject, run_dir: Path, generator: Any, job_id: str) -> None:
@@ -493,9 +534,15 @@ def _generate_direction_action(project: PetProject, run_dir: Path, generator: An
             _qa_row9(run_dir)
         else:
             _qa_row10(run_dir)
-    except Exception:
+    except JobGenerationError:
         (run_dir / "decoded" / f"{job_id}.png").unlink(missing_ok=True)
-        raise JobGenerationError(job_id, "generation-failed") from None
+        raise
+    except Exception as error:
+        (run_dir / "decoded" / f"{job_id}.png").unlink(missing_ok=True)
+        raise JobGenerationError(
+            job_id, "generation-failed",
+            _exception_diagnostic(error, "deterministic-qa"),
+        ) from None
     _complete_job(run_dir, job_id, source, datetime.now(timezone.utc).isoformat())
 
 
@@ -514,9 +561,10 @@ def _generate_source(project: PetProject, run_dir: Path, generator: Any, job_id:
         raise ValueError("job output path is invalid")
     prompt = prompt_path.read_text(encoding="utf-8")
     destination = run_dir / "generated-sources" / f"{job_id}.png"
-    grounding = _grounding(run_dir, job_id)
+    guide_records = load_generation_guides(run_dir, job_id)
+    grounding = _grounding(run_dir, job_id, guide_records)
     canvas = job["canvas"]
-    _begin_attempt(run_dir, job_id)
+    _begin_attempt(run_dir, job_id, guide_records)
     request = ImageRequest(
         prompt=prompt,
         destination=destination,
@@ -526,12 +574,29 @@ def _generate_source(project: PetProject, run_dir: Path, generator: Any, job_id:
         image_size=canvas["image_size"],
         task=job_id,
     )
-    generated = generator.edit(request) if grounding else generator.generate(request)
-    source = Path(generated.path)
-    if source != destination or source.is_symlink():
-        raise ValueError("generated source path is invalid")
-    _validate_png(source)
+    try:
+        generated = generator.edit(request) if grounding else generator.generate(request)
+    except Exception as error:
+        raise JobGenerationError(
+            job_id, "generation-failed",
+            _exception_diagnostic(error, "provider-request"),
+        ) from None
+    try:
+        source = Path(generated.path)
+        if source != destination or source.is_symlink():
+            raise ValueError("generated source path is invalid")
+        _validate_png(source)
+    except Exception:
+        raise JobGenerationError(
+            job_id, "generation-failed", SafeDiagnostic("deterministic-qa")
+        ) from None
     return source
+
+
+def _exception_diagnostic(error: Exception, fallback: str) -> SafeDiagnostic:
+    if isinstance(error, OpenAIImageError):
+        return error.diagnostic
+    return SafeDiagnostic(fallback)
 
 
 def _validate_manifest_inputs(run_dir: Path, job_id: str, job: dict[str, Any]) -> None:
@@ -585,7 +650,11 @@ def _validate_manifest_inputs(run_dir: Path, job_id: str, job: dict[str, Any]) -
             raise ValueError("required job input is missing")
 
 
-def _grounding(run_dir: Path, job_id: str) -> tuple[GroundingImage, ...]:
+def _grounding(
+    run_dir: Path,
+    job_id: str,
+    guide_records: tuple[dict[str, str], ...] | None = None,
+) -> tuple[GroundingImage, ...]:
     paths: list[tuple[Path, str]] = []
     metadata = _read_json(run_dir / "omnipet-run.json")
     references = []
@@ -609,7 +678,30 @@ def _grounding(run_dir: Path, job_id: str) -> tuple[GroundingImage, ...]:
             paths.append((_safe_run_file(run_dir, "decoded/look-cardinals-approved.png"), "approved cardinal anchors"))
         if job_id == "look-row-10":
             paths.append((_safe_run_file(run_dir, "decoded/look-row-9.png"), "completed first direction row"))
-    return tuple(_snapshot(path, role) for path, role in paths)
+    records = (
+        load_generation_guides(run_dir, job_id)
+        if guide_records is None
+        else guide_records
+    )
+    snapshots = [_snapshot(path, role) for path, role in paths]
+    for record in records:
+        snapshot = _snapshot(
+            _safe_run_file(run_dir, record["path"]),
+            _provider_guide_role(record),
+        )
+        if snapshot.content_sha256 != record["sha256"]:
+            raise ValueError("registered guide changed")
+        snapshots.append(snapshot)
+    return tuple(snapshots)
+
+
+def _provider_guide_role(record: dict[str, str]) -> str:
+    authoritative = "true" if record["authority"] == "identity" else "false"
+    return (
+        f"authority={record['authority']}; "
+        f"identity_authoritative={authoritative}; "
+        f"role={json.dumps(record['role'])}"
+    )
 
 
 def _snapshot(path: Path, role: str) -> GroundingImage:
@@ -854,7 +946,11 @@ def _next_pending(run_dir: Path, job_ids: tuple[str, ...]) -> str | None:
     return next((job_id for job_id in job_ids if _job(run_dir, job_id)["status"] != "complete"), None)
 
 
-def _begin_attempt(run_dir: Path, job_id: str) -> None:
+def _begin_attempt(
+    run_dir: Path,
+    job_id: str,
+    guide_records: tuple[dict[str, str], ...] = (),
+) -> None:
     manifest = _read_json(run_dir / "imagegen-jobs.json")
     job = next(item for item in manifest["jobs"] if item["id"] == job_id)
     if job["status"] != "pending":
@@ -862,6 +958,7 @@ def _begin_attempt(run_dir: Path, job_id: str) -> None:
     metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
     metadata["attempts"] = int(metadata.get("attempts", 0)) + 1
     metadata["started_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["generation_guides"] = [dict(record) for record in guide_records]
     job.update({"status": "running", "metadata": metadata})
     _write_json(run_dir / "imagegen-jobs.json", manifest)
 
@@ -874,6 +971,7 @@ def _set_job_status(run_dir: Path, job_id: str, status: str) -> None:
 
 def _fail_job(run_dir: Path, job_id: str) -> None:
     _set_job_status(run_dir, job_id, "failed")
+    clear_generation_guides(run_dir, job_id)
 
 
 def _complete_job(run_dir: Path, job_id: str, source: Path, completed: str) -> None:
@@ -883,6 +981,7 @@ def _complete_job(run_dir: Path, job_id: str, source: Path, completed: str) -> N
         raise ValueError("job is not running")
     job.update({"status": "complete", "source_path": str(source), "completed_at": completed})
     _write_json(run_dir / "imagegen-jobs.json", manifest)
+    clear_generation_guides(run_dir, job_id)
 
 
 def _running_job(run_dir: Path) -> str | None:

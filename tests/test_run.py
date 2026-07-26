@@ -71,6 +71,12 @@ class RunPreparationTests(unittest.TestCase):
         (self.root / "references").mkdir(parents=True)
         (self.root / "approved").mkdir()
         (self.root / "brief.md").write_text("# Ember\n", encoding="utf-8")
+        (self.root / "README.md").write_text("# Ember\n", encoding="utf-8")
+        (self.root / "README.zh-CN.md").write_text("# Ember\n", encoding="utf-8")
+        (self.root / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         Image.new("RGB", (2, 2), "red").save(self.root / "references" / "portrait.png")
         Image.new("RGBA", (2, 2), (1, 2, 3, 255)).save(
             self.root / "approved" / "canonical-base.png"
@@ -94,6 +100,13 @@ hatch_engine:
 package:
   spritesheet: dist/spritesheet.webp
   manifest: dist/pet.json
+release:
+  version: 1.0.0
+  asset_license: CC-BY-NC-4.0
+  readme: README.md
+  readme_zh_cn: README.zh-CN.md
+  asset_license_file: LICENSE-ASSETS
+  preview_source: approved/canonical-base.png
 approved:
   canonical_base: approved/canonical-base.png
 """,

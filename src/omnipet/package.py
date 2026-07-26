@@ -30,6 +30,7 @@ from omnipet.hatch.directions import (
 )
 from omnipet.hatch.inspect import ContactSheetConfig, make_contact_sheet
 from omnipet.hatch.validation import ValidateAtlasConfig, validate_atlas
+from omnipet.review_resolution import ResolutionError, validate_report_resolutions
 
 
 class PackageError(RuntimeError):
@@ -335,6 +336,7 @@ def check_package(project: Any) -> dict[str, Any]:
         blind = _read_json(_safe_file(run_dir, "qa/package-reviewed/blind-validation.json"))
         semantics = _read_json(_safe_file(run_dir, "qa/package-reviewed/final-direction-semantics.json"))
         visual = _read_json(_safe_file(run_dir, "qa/package-reviewed/final-visual-review.json"))
+        warnings = continuity.get("warnings")
         if (
             validation.get("ok") is not True
             or validation.get("sprite_version_number") != 2
@@ -343,8 +345,8 @@ def check_package(project: Any) -> dict[str, Any]:
             or despill_report.get("ok") is not True
             or despill_report.get("passes") != 1
             or continuity.get("ok") is not True
-            or continuity.get("reviewRequired") is not False
-            or continuity.get("warnings") != []
+            or not isinstance(warnings, list)
+            or continuity.get("reviewRequired") is not bool(warnings)
             or blind.get("ok") is not True
             or blind.get("unconfirmed") != []
             or semantics.get("ok") is not True
@@ -352,7 +354,11 @@ def check_package(project: Any) -> dict[str, Any]:
             or visual.get("verdict") != "pass"
         ):
             raise PackageError("package QA is not accepted")
-    except KeyError:
+        if warnings:
+            validate_report_resolutions(
+                run_dir, "qa/package-generated/continuity.json"
+            )
+    except (KeyError, ResolutionError):
         raise PackageError("package QA is invalid") from None
     return manifest
 

@@ -104,6 +104,8 @@ def load_approvals(run_dir: Path) -> tuple[StageApproval, ...]:
 
 
 def required_artifacts(run_dir: Path, stage: str) -> tuple[ArtifactHash, ...]:
+    from omnipet.review_resolution import ResolutionError
+
     run_dir = _validated_run_dir(run_dir)
     if stage not in STAGES:
         raise ApprovalError("approval stage is invalid")
@@ -114,7 +116,14 @@ def required_artifacts(run_dir: Path, stage: str) -> tuple[ArtifactHash, ...]:
             ArtifactHash(path, _sha256_safe(run_dir, path))
             for path in sorted(relative_paths)
         )
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+    except (
+        ResolutionError,
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ):
         raise ApprovalError("approval evidence is invalid") from None
 
 
@@ -245,7 +254,18 @@ def _parse_record(value: Any) -> StageApproval:
 
 def _required_paths(run_dir: Path, stage: str) -> set[str]:
     if stage == "package":
-        return set(STAGE_EVIDENCE_PATHS[stage])
+        from omnipet.review_resolution import resolution_artifact_paths
+
+        paths = set(STAGE_EVIDENCE_PATHS[stage])
+        continuity = _read_json_object(
+            run_dir / "qa/package-generated/continuity.json"
+        )
+        warnings = continuity.get("warnings")
+        if isinstance(warnings, list) and warnings:
+            paths.update(resolution_artifact_paths(
+                run_dir, "qa/package-generated/continuity.json"
+            ))
+        return paths
     manifest_path = run_dir / "imagegen-jobs.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("run manifest is unsafe")

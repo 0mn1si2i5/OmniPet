@@ -24,6 +24,12 @@ class PetCliTests(unittest.TestCase):
         (pet_root / "references").mkdir(parents=True)
         (pet_root / "approved").mkdir()
         (pet_root / "brief.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (pet_root / "README.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (pet_root / "README.zh-CN.md").write_text("# 示例宠物\n", encoding="utf-8")
+        (pet_root / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         (pet_root / "references" / "portrait.jpg").write_bytes(b"portrait")
         (pet_root / "approved" / "canonical-base.png").write_bytes(b"base")
         (pet_root / "pet.yaml").write_text(VALID_PET_YAML, encoding="utf-8")

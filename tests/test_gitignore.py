@@ -63,6 +63,14 @@ class GitignoreTests(unittest.TestCase):
 
         self.assertEqual(ignored, runtime)
 
+    def test_release_work_is_ignored_without_hiding_public_catalog_bundles(self):
+        disposable = {"release-work/test-pet-1.2.3/release.json"}
+        public = {"pets/test-pet/release.json"}
+
+        ignored = self.check_ignored(*(disposable | public))
+
+        self.assertEqual(ignored, disposable)
+
 
 if __name__ == "__main__":
     unittest.main()

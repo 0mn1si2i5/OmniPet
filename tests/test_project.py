@@ -34,6 +34,13 @@ hatch_engine:
 package:
   spritesheet: dist/spritesheet.webp
   manifest: dist/pet.json
+release:
+  version: 1.2.3
+  asset_license: CC-BY-NC-4.0
+  readme: README.md
+  readme_zh_cn: README.zh-CN.md
+  asset_license_file: LICENSE-ASSETS
+  preview_source: dist/spritesheet.webp
 approved:
   canonical_base: approved/canonical-base.png
 """
@@ -64,6 +71,12 @@ class PetProjectTests(unittest.TestCase):
         (self.pet_root / "references").mkdir(parents=True)
         (self.pet_root / "approved").mkdir()
         (self.pet_root / "brief.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (self.pet_root / "README.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (self.pet_root / "README.zh-CN.md").write_text("# 示例宠物\n", encoding="utf-8")
+        (self.pet_root / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         (self.pet_root / "references" / "portrait.jpg").write_bytes(b"portrait")
         (self.pet_root / "approved" / "canonical-base.png").write_bytes(b"base")
         self.pet_yaml = self.pet_root / "pet.yaml"
@@ -108,6 +121,116 @@ class PetProjectTests(unittest.TestCase):
             project.canonical_base_path,
             self.pet_root / "approved" / "canonical-base.png",
         )
+        self.assertEqual(project.release_version, "1.2.3")
+        self.assertEqual(project.asset_license, "CC-BY-NC-4.0")
+        self.assertEqual(project.release_readme_path, self.pet_root / "README.md")
+        self.assertEqual(
+            project.release_readme_zh_cn_path,
+            self.pet_root / "README.zh-CN.md",
+        )
+        self.assertEqual(
+            project.asset_license_path,
+            self.pet_root / "LICENSE-ASSETS",
+        )
+        self.assertEqual(
+            project.preview_source_path,
+            self.pet_root / "dist" / "spritesheet.webp",
+        )
+
+    def test_release_metadata_is_closed(self):
+        self._replace(
+            "  preview_source: dist/spritesheet.webp",
+            "  preview_source: dist/spritesheet.webp\n  repository_token: secret",
+        )
+
+        with self.assertRaises(ProjectValidationError):
+            load_pet_project(self.repo_root, "sample-pet")
+
+    def test_rejects_invalid_release_versions(self):
+        for version in ("1", "1.2", "01.2.3", "1.2.3.4", "v1.2.3", "1.2.3-"):
+            with self.subTest(version=version):
+                self._replace("version: 1.2.3", f"version: {version}")
+                with self.assertRaises(ProjectValidationError):
+                    load_pet_project(self.repo_root, "sample-pet")
+                self.pet_yaml.write_text(VALID_PET_YAML, encoding="utf-8")
+
+    def test_accepts_semantic_release_prerelease_and_build_metadata(self):
+        self._replace("version: 1.2.3", "version: 1.2.3-rc.1+build.7")
+
+        project = load_pet_project(self.repo_root, "sample-pet")
+
+        self.assertEqual(project.release_version, "1.2.3-rc.1+build.7")
+
+    def test_rejects_invalid_spdx_asset_license(self):
+        for asset_license in (
+            "",
+            "not a license",
+            "MIT OR Apache-2.0",
+            "LicenseRef-Proprietary",
+            "Zlibb",
+        ):
+            with self.subTest(asset_license=asset_license):
+                replacement = (
+                    'asset_license: ""'
+                    if not asset_license
+                    else f"asset_license: {asset_license}"
+                )
+                self._replace("asset_license: CC-BY-NC-4.0", replacement)
+                with self.assertRaises(ProjectValidationError):
+                    load_pet_project(self.repo_root, "sample-pet")
+                self.pet_yaml.write_text(VALID_PET_YAML, encoding="utf-8")
+
+    def test_release_readme_zh_cn_is_optional(self):
+        self._replace("  readme_zh_cn: README.zh-CN.md\n", "")
+
+        project = load_pet_project(self.repo_root, "sample-pet")
+
+        self.assertIsNone(project.release_readme_zh_cn_path)
+
+    def test_rejects_explicit_null_release_readme_zh_cn(self):
+        self._replace("readme_zh_cn: README.zh-CN.md", "readme_zh_cn: null")
+
+        with self.assertRaises(ProjectValidationError):
+            load_pet_project(self.repo_root, "sample-pet")
+
+    def test_rejects_missing_release_text_files(self):
+        for relative in ("README.md", "README.zh-CN.md", "LICENSE-ASSETS"):
+            with self.subTest(relative=relative):
+                path = self.pet_root / relative
+                content = path.read_bytes()
+                path.unlink()
+                with self.assertRaises(ProjectValidationError):
+                    load_pet_project(self.repo_root, "sample-pet")
+                path.write_bytes(content)
+
+    def test_rejects_release_path_traversal(self):
+        for field, value in (
+            ("readme", "../README.md"),
+            ("readme_zh_cn", "../README.zh-CN.md"),
+            ("asset_license_file", "../LICENSE-ASSETS"),
+            ("preview_source", "../preview.webp"),
+        ):
+            with self.subTest(field=field):
+                original = {
+                    "readme": "README.md",
+                    "readme_zh_cn": "README.zh-CN.md",
+                    "asset_license_file": "LICENSE-ASSETS",
+                    "preview_source": "dist/spritesheet.webp",
+                }[field]
+                self._replace(f"{field}: {original}", f"{field}: {value}")
+                with self.assertRaises(ProjectValidationError):
+                    load_pet_project(self.repo_root, "sample-pet")
+                self.pet_yaml.write_text(VALID_PET_YAML, encoding="utf-8")
+
+    def test_rejects_symlinked_release_text_file(self):
+        outside = self.repo_root / "outside-readme.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        readme = self.pet_root / "README.md"
+        readme.unlink()
+        readme.symlink_to(outside)
+
+        with self.assertRaises(ProjectValidationError):
+            load_pet_project(self.repo_root, "sample-pet")
 
     def test_locates_standalone_project_from_root_selector(self):
         standalone = self._standalone_project()
@@ -610,6 +733,12 @@ class PetProjectTests(unittest.TestCase):
         (standalone / "references").mkdir(parents=True)
         (standalone / "approved").mkdir()
         (standalone / "brief.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (standalone / "README.md").write_text("# Sample Pet\n", encoding="utf-8")
+        (standalone / "README.zh-CN.md").write_text("# 示例宠物\n", encoding="utf-8")
+        (standalone / "LICENSE-ASSETS").write_text(
+            "SPDX-License-Identifier: CC-BY-NC-4.0\n",
+            encoding="utf-8",
+        )
         (standalone / "references" / "portrait.jpg").write_bytes(b"portrait")
         (standalone / "approved" / "canonical-base.png").write_bytes(b"base")
         (standalone / "pet.yaml").write_text(VALID_PET_YAML, encoding="utf-8")
