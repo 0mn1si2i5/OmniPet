@@ -108,6 +108,7 @@ class PetProjectTests(unittest.TestCase):
         self.assertEqual(project.image_generation_model, "gpt-image-2")
         self.assertEqual(project.image_generation_quality, "low")
         self.assertEqual(project.minimum_sprite_version, 2)
+        self.assertEqual(project.agent_workflow_version, 1)
         self.assertEqual(
             dict(project.hatch_engine_requirements),
             {"atlas_layout": "extended-v2"},
@@ -463,6 +464,31 @@ class PetProjectTests(unittest.TestCase):
         project = load_pet_project(self.repo_root, "sample-pet")
 
         self.assertEqual(project.minimum_sprite_version, 3)
+
+    def test_loads_explicit_agent_workflow_version_two(self):
+        self._replace(
+            "  minimum_sprite_version: 2",
+            "  minimum_sprite_version: 2\n  agent_workflow_version: 2",
+        )
+
+        project = load_pet_project(self.repo_root, "sample-pet")
+
+        self.assertEqual(project.agent_workflow_version, 2)
+        self.assertEqual(
+            dict(project.hatch_engine_requirements),
+            {"atlas_layout": "extended-v2"},
+        )
+
+    def test_rejects_invalid_agent_workflow_versions(self):
+        for value in ("true", "false", "0", "3", '"2"'):
+            with self.subTest(value=value):
+                self._replace(
+                    "  minimum_sprite_version: 2",
+                    "  minimum_sprite_version: 2\n  agent_workflow_version: " + value,
+                )
+                with self.assertRaises(ProjectValidationError):
+                    load_pet_project(self.repo_root, "sample-pet")
+                self.pet_yaml.write_text(VALID_PET_YAML, encoding="utf-8")
 
     def test_rejects_blank_required_text_and_path_fields(self):
         replacements = (

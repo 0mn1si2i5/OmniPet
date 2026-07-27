@@ -30,6 +30,13 @@ class GenerationGuideTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         init_pet_project(self.root, "my-pet")
+        manifest = self.root / "pets/my-pet/pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  agent_workflow_version: 2\n", ""
+            ),
+            encoding="utf-8",
+        )
         self.project = load_pet_project(self.root, "my-pet")
         self.run_dir = prepare_run(self.project, self.root).run_dir
         self.source = self.root / "pose-guide.png"

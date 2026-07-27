@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/state-storyboard-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pet_id", "design_revision", "states", "shared_silhouette_rules"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pet_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "design_revision": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idle", "running-right", "running-left", "waving", "jumping", "failed", "waiting", "running", "review"],
+      "properties": {
+        "idle": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "running-right": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "running-left": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "waving": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "jumping": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "failed": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "waiting": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "running": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "review": {"type": "object", "additionalProperties": false, "required": ["silhouette", "action_intent", "key_poses"], "properties": {"silhouette": {"type": "string", "minLength": 1}, "action_intent": {"type": "string", "minLength": 1}, "key_poses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}
+      }
+    },
+    "shared_silhouette_rules": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

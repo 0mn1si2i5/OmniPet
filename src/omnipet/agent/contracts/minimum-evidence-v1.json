@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "requirements": {
+    "always": ["animation-ready-canonical", "motion-cycle"],
+    "directional_motion": ["screen-left-anchor", "screen-right-anchor"],
+    "unsafe_mirror": ["screen-left-anchor", "screen-right-anchor"],
+    "compound_character": ["stable-attachment"],
+    "airborne_state": ["grounded-anticipation", "airborne", "return-pose"],
+    "state_extreme": ["state-extreme-anchor"],
+    "unsupported_reference_view": ["unsupported-view-anchor"]
+  }
+}

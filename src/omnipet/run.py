@@ -17,6 +17,13 @@ from omnipet.hatch import HatchExecutionError
 from omnipet.hatch.prepare import PrepareRunInputs, prepare_run as prepare_hatch_run
 from omnipet.project import PetProject
 from omnipet.security import contains_credential_like_text, is_credential_like_key
+from omnipet._vendor.hatch.scripts.prepare_pet_run import (
+    look_row_axis_contract,
+    look_row_boundary_contract,
+    look_row_layout_contract,
+    look_row_pre_return_check,
+    look_row_screen_coordinate_contract,
+)
 
 
 EXPECTED_JOB_IDS = (
@@ -86,9 +93,17 @@ class RunState:
 def prepare_run(
     project: PetProject,
     repo_root: Path,
-) -> RunState:
+) -> RunState | Any:
     repo_root, runs_root, run_dir = _run_paths(repo_root, project.pet_id)
     if run_dir.exists() and any(run_dir.iterdir()):
+        try:
+            workflow = _read_json_document(run_dir / "workflow.json")
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            workflow = None
+        if isinstance(workflow, dict) and workflow.get("schema_version") == 2:
+            from omnipet.workflow import load_workflow_v2
+
+            return load_workflow_v2(run_dir)
         state = load_run_state(repo_root, project.pet_id, display_name=project.display_name)
         _validate_references(project, run_dir)
         _validate_canonical_base(project, run_dir)
@@ -97,6 +112,10 @@ def prepare_run(
     _create_runtime_parents(repo_root, runs_root)
     if run_dir.exists():
         raise RunPreparationError("empty run destination already exists")
+    if project.agent_workflow_version == 2:
+        from omnipet.release import initialize_design_run
+
+        return initialize_design_run(run_dir, project.pet_id, project.references)
     run_dir.mkdir()
     try:
         prepare_hatch_run(
@@ -215,6 +234,7 @@ def adopt_canonical(
             manifest, jobs, run_dir, generated_source, digest, completed_at
         )
         _atomic_write_json(staging / "imagegen-jobs.json", normalized_manifest)
+        _upgrade_manifest_canvas(staging / "imagegen-jobs.json")
         normalized_request = dict(request)
         normalized_request.update({
             "pet_notes": _current_pet_notes(project),
@@ -280,6 +300,24 @@ def adopt_canonical(
                 "policy": "safe-evidence-v2",
             },
         })
+        _atomic_validated_copy(canonical, staging / "generated-sources" / "base.png")
+        (qa / "candidates").mkdir(parents=True)
+        _atomic_write_json(qa / "candidates" / "base.json", {
+            "schema_version": 1,
+            "job_id": "base",
+            "source_path": "generated-sources/base.png",
+            "sha256": digest,
+            "canvas": {"aspect_ratio": "1:1", "image_size": "1K"},
+        })
+        (qa / "base").mkdir(parents=True)
+        _atomic_write_json(qa / "base" / "review.json", {
+            "adoption_decision": "approved durable canonical",
+            "canvas": {"aspect_ratio": "1:1", "image_size": "1K"},
+            "completed_at": completed_at,
+            "job_id": "base",
+            "ok": True,
+            "sha256": digest,
+        })
 
         _load_state_at(staging, project.pet_id, project.display_name)
         _validate_canonical_base(project, staging)
@@ -313,6 +351,43 @@ def adopt_canonical(
         if archive_published and archive.exists():
             shutil.rmtree(archive)
         raise RunPreparationError("canonical adoption failed") from None
+
+
+def refresh_prompts(project: PetProject, repo_root: Path) -> RunState:
+    repo_root, runs_root, run_dir = _run_paths(repo_root, project.pet_id)
+    request = _read_json_document(run_dir / "pet_request.json")
+    metadata = _read_json_document(run_dir / "omnipet-run.json")
+    analysis_path = run_dir / "qa" / "pet-analysis.md"
+    if not analysis_path.is_file():
+        raise RunPreparationError(
+            "qa/pet-analysis.md not found — write the pet analysis before refreshing prompts"
+        )
+    analysis_text = analysis_path.read_text(encoding="utf-8")
+    prompt_files = build_current_prompts(project, request, analysis_text=analysis_text)
+    _write_current_prompts(prompt_files, run_dir / "prompts")
+    prompt_manifest = {
+        path: hashlib.sha256(content.encode("utf-8")).hexdigest()
+        for path, content in prompt_files.items()
+    }
+    metadata["prompt_manifest"] = prompt_manifest
+    _atomic_write_json(run_dir / "omnipet-run.json", metadata)
+
+    manifest_path = run_dir / "imagegen-jobs.json"
+    manifest = _read_json_document(manifest_path)
+    jobs = manifest.get("jobs")
+    if isinstance(jobs, list):
+        for job in jobs:
+            if not isinstance(job, dict) or "prompt_file" not in job:
+                continue
+            prompt_path = run_dir / job["prompt_file"]
+            if not prompt_path.is_file():
+                continue
+            job_meta = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+            job_meta["prompt_sha256"] = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
+            job["metadata"] = job_meta
+        _atomic_write_json(manifest_path, manifest)
+
+    return _load_state_at(run_dir, project.pet_id, project.display_name)
 
 
 def _adopted_manifest(
@@ -386,17 +461,29 @@ def _validated_jobs_for_adoption(data: Any) -> list[dict[str, Any]]:
 
 def _has_nonbase_evidence(run_dir: Path, jobs: list[dict[str, Any]]) -> bool:
     generated_fields = {
-        "source_path", "completed_at", "derived_from", "mirror_decision", "metadata",
+        "source_path", "completed_at", "derived_from", "mirror_decision",
         "repair_source_paths", "adoption_decision",
     }
-    if any(job["status"] != "pending" or not generated_fields.isdisjoint(job) for job in jobs[1:]):
+    if any(
+        job["status"] != "pending"
+        or not generated_fields.isdisjoint(job)
+        or (
+            isinstance(job.get("metadata"), dict)
+            and set(job["metadata"]) - {"prompt_sha256"}
+        )
+        for job in jobs[1:]
+    ):
         return True
     decoded = run_dir / "decoded"
     if decoded.is_dir() and any(path.name != "base.png" for path in decoded.iterdir()):
         return True
     generated = run_dir / "generated-sources"
     base_source = Path(jobs[0].get("source_path", ""))
-    if generated.is_dir() and any(path != base_source for path in generated.iterdir()):
+    base_candidate_source = generated / "base.png"
+    if generated.is_dir() and any(
+        path != base_source and path != base_candidate_source
+        for path in generated.iterdir()
+    ):
         return True
     visual = run_dir / "qa" / "visual-jobs"
     if visual.is_dir():
@@ -478,13 +565,17 @@ def _is_fully_reconciled(
         "run_path": "references/canonical-base.png",
         "sha256": digest,
     }
-    expected_prompts = build_current_prompts(project, request)
+    analysis_path = run_dir / "qa" / "pet-analysis.md"
+    analysis_text = ""
+    if analysis_path.is_file():
+        analysis_text = analysis_path.read_text(encoding="utf-8")
+    expected_prompts = build_current_prompts(project, request, analysis_text=analysis_text)
     expected_prompt_manifest = {
         path: hashlib.sha256(content.encode("utf-8")).hexdigest()
         for path, content in expected_prompts.items()
     }
     generated_fields = {
-        "source_path", "completed_at", "derived_from", "mirror_decision", "metadata",
+        "source_path", "completed_at", "derived_from", "mirror_decision",
         "repair_source_paths", "adoption_decision",
     }
     expected_canvases = [
@@ -498,10 +589,11 @@ def _is_fully_reconciled(
     }
     expected_qa_files = {
         "progress.md", "time-log.json", f"visual-jobs/{source.stem}.result.json",
+        "candidates/base.json", "base/review.json",
     }
     return (
         {path.name for path in run_dir.iterdir()} == expected_top_level
-        and {path.name for path in generated_root.iterdir()} == {source.name}
+        and {path.name for path in generated_root.iterdir()} == {source.name, "base.png"}
         and {path.name for path in decoded_root.iterdir()} == {"base.png"}
         and base.get("metadata", {}).get("sha256") == digest
         and base.get("metadata", {}).get("format") == "PNG"
@@ -512,7 +604,12 @@ def _is_fully_reconciled(
         and bool(base["completed_at"])
         and base.get("adoption_decision") == "approved durable canonical"
         and all(
-            job.get("status") == "pending" and generated_fields.isdisjoint(job)
+            job.get("status") == "pending"
+            and generated_fields.isdisjoint(job)
+            and (
+                not isinstance(job.get("metadata"), dict)
+                or set(job["metadata"]) <= {"prompt_sha256"}
+            )
             for job in jobs[1:]
         )
         and [job.get("canvas") for job in jobs] == expected_canvases
@@ -555,35 +652,306 @@ def _current_pet_notes(project: PetProject) -> str:
     return " ".join(project.brief_path.read_text(encoding="utf-8").split())
 
 
+_STATE_PROMPTS = {
+    "idle": "Calm low-distraction resting loop: subtle breathing, tiny blink, slight head/body bob, and only quiet persona-preserving motion.",
+    "running-right": "Dragging-right loop: show directional movement to the right through body and limb poses only. The character must face and travel right — rotate the body, shift the gaze direction, and lean into the movement.",
+    "running-left": "Dragging-left loop: show directional movement to the left through body and limb poses only. The character must face and travel left — rotate the body, shift the gaze direction, and lean into the movement.",
+    "waving": "Greeting loop: paw or limb down, raised, tilted, and returning in a friendly attention gesture.",
+    "jumping": "Hover jump loop: anticipation, lift, airborne peak, descent, and settle through body height.",
+    "failed": "Blocked/failed loop: slumped or deflated reaction with sad or closed eyes.",
+    "waiting": "Needs-input loop: expectant asking pose for approval, help, or user input.",
+    "running": "Working loop: focused active-task processing, thinking, typing, scanning, or effortful concentration; not literal foot-running, jogging, sprinting, treadmill motion, raised knees, long steps, pumping arms, or directional travel.",
+    "review": "Ready-review loop: focused inspection of completed output with lean, blink, narrowed eyes, head tilt, or paw pose.",
+}
+
+_STATE_REQUIREMENTS = {
+    "idle": [
+        "CRITICAL: idle is the low-distraction baseline state and the first frame is also used as the reduced-motion static pet.",
+        "Use only subtle idle motion: gentle breathing, a tiny blink, a slight head or body bob, a very small material sway, or another quiet motion that fits the pet persona.",
+        "Keep the pet essentially in the same pose, facing direction, silhouette, markings, palette, and prop state across all frames.",
+        "Idle variation must stay calm but still read as animation; do not repeat effectively identical copies across the loop.",
+        "Do not show waving, walking, running, jumping, talking, working, reviewing, emotional reactions, large gestures, item interactions, or new props.",
+        "Feet, base, body, or object anchor should remain planted or nearly planted.",
+        "The first and last frames should be very close visually so the loop feels calm and does not pop.",
+    ],
+    "running-right": [
+        "Show directional drag movement to the right through body, limb, and prop movement only.",
+        "The character must unmistakably face and travel right — rotate the body, change the gaze direction, and shift weight rightward.",
+        "The movement cadence must alternate visibly across the frames instead of repeating one nearly static stride.",
+        "Vary the pose and expression between frames to convey effort, momentum, and direction.",
+        "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
+    ],
+    "running-left": [
+        "Show directional drag movement to the left through body, limb, and prop movement only.",
+        "The character must unmistakably face and travel left — rotate the body, change the gaze direction, and shift weight leftward.",
+        "The movement cadence must alternate visibly across the frames instead of repeating one nearly static stride.",
+        "Vary the pose and expression between frames to convey effort, momentum, and direction.",
+        "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
+    ],
+    "waving": [
+        "Show the greeting through paw, hand, wing, or limb pose only.",
+        "Vary the expression and pose between frames to convey a friendly, animated greeting.",
+        "Do not draw wave marks, motion arcs, lines, sparkles, symbols, or floating effects around the gesture.",
+    ],
+    "jumping": [
+        "Show the jump through pose and vertical body position only: anticipation, lift, airborne peak, descent, settle.",
+        "Vary the expression between frames to convey effort at the peak and relief on landing.",
+        "Do not draw ground shadows, contact shadows, drop shadows, oval shadows, landing marks, dust, smears, bounce pads, or motion marks under the pet.",
+        "Keep the background outside the pet perfectly flat chroma key with no darker key-colored patches.",
+    ],
+    "failed": [
+        "Show failure through slumped pose, drooping ears/limbs, closed or sad eyes, and lower body position.",
+        "Vary the expression between frames to show the emotional shift from disappointment to recovery.",
+        "Tears, small smoke puffs, or tiny stars are allowed only if attached to or overlapping the pet silhouette and kept inside the same frame slot.",
+        "Do not draw red X marks, floating symbols, detached stars, separated smoke clouds, falling tear drops, dust, or other loose effects.",
+    ],
+    "waiting": [
+        "Show that Codex needs approval, help, or user input through an expectant asking pose.",
+        "Vary the expression and pose between frames to convey growing anticipation.",
+        "Keep the motion patient and readable, without turning it into ordinary idle or review.",
+    ],
+    "running": [
+        "Show the pet actively working or processing, as if running a task: focused posture, busy hands or paws, purposeful bobbing, thinking motion, tool or prop motion only if already part of the pet identity, or other non-locomotion activity.",
+        "Vary the expression and pose between frames to convey concentration and effort.",
+        "Do not show literal foot-running, jogging, sprinting, treadmill motion, raised knees, long steps, pumping arms, directional travel, speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
+    ],
+    "review": [
+        "Show review through lean, blink, narrowed eyes, head tilt, or paw/hand position.",
+        "Vary the expression and pose between frames to convey focused inspection.",
+        "Do not add magnifying glasses, papers, code, UI, punctuation, symbols, or other new props unless they already exist in the base pet identity.",
+    ],
+}
+
+_DEFAULT_ROW_FRAMES = {
+    "idle": 6,
+    "running-right": 8,
+    "running-left": 8,
+    "waving": 4,
+    "jumping": 5,
+    "failed": 8,
+    "waiting": 6,
+    "running": 6,
+    "review": 6,
+}
+
+_STANDARD_ROW_STATES = (
+    "idle", "running-right", "running-left", "waving", "jumping",
+    "failed", "waiting", "running", "review",
+)
+
+_LOOK_ROW_ACTIONS = {
+    "look-row-9": "Render the first eight clockwise look directions.",
+    "look-row-10": "Render the final eight clockwise look directions.",
+}
+
+_LOOK_ROW_DIRECTIONS = {
+    "look-row-9": ["000", "022.5", "045", "067.5", "090", "112.5", "135", "157.5"],
+    "look-row-10": ["180", "202.5", "225", "247.5", "270", "292.5", "315", "337.5"],
+}
+
+_LOOK_ROW_NUMBERS = {
+    "look-row-9": 9,
+    "look-row-10": 10,
+}
+
+
 def _identity_contract(project: PetProject) -> str:
     return (
-        f"Keep {project.display_name}'s identity, proportions, palette, costume, accessories, and "
-        "rendering style consistent in every image. Preserve the durable brief and reference "
-        "images; do not add, remove, relocate, or mirror asymmetric identity details."
+        f"Keep {project.display_name}'s core identity — palette, costume, accessories, props, "
+        "species, and proportions — consistent in every image. Preserve the durable brief and "
+        "reference images. Vary pose, expression, body orientation, facing direction, and "
+        "posture freely between frames to convey the action; the character is a living, "
+        "animated being, not a static statue."
     )
 
 
-def build_current_prompts(project: PetProject, request: Mapping[str, Any]) -> dict[str, str]:
-    rows = {
-        "idle": "Show a quiet breathing and blinking loop.",
-        "running-right": "Travel screen-right with quick alternating steps.",
-        "running-left": "Travel screen-left with quick alternating steps.",
-        "waving": "Give a clear, friendly greeting gesture.",
-        "jumping": "Make a compact hop and settle back to the baseline.",
-        "failed": "Show brief disappointment, then recover.",
-        "waiting": "Lean forward with an expectant waiting motion.",
-        "running": "Show concentrated task work.",
-        "review": "Inspect completed work with a focused head movement.",
-        "look-row-9": "Render the first eight clockwise look directions.",
-        "look-row-10": "Render the final eight clockwise look directions.",
-    }
+def _row_prompt_body(
+    project: PetProject,
+    request: Mapping[str, Any],
+    state: str,
+) -> str:
+    pet_notes = request.get("pet_notes") or _current_pet_notes(project)
+    style_contract = request.get("style_contract", "")
+    chroma = request.get("chroma_key") or {}
+    chroma_hex = chroma.get("hex", "#00FFFF")
+    chroma_name = chroma.get("name", "cyan")
     contract = _identity_contract(project)
+    state_prompt = _STATE_PROMPTS.get(state, "")
+    state_reqs = _STATE_REQUIREMENTS.get(state, [])
+    state_reqs_text = "\n".join(f"- {line}" for line in state_reqs)
+    frames = _DEFAULT_ROW_FRAMES.get(state, 6)
+    for row_spec in request.get("rows") or []:
+        if row_spec.get("state") == state:
+            frames = row_spec.get("frames", frames)
+            break
+    return (
+        f"# {state}\n\n"
+        f"Create one horizontal animation strip for Codex pet `{project.pet_id}`, state `{state}`.\n\n"
+        "Use the attached canonical base for identity. Use the attached layout guide only for "
+        "slot count, spacing, centering, and padding; do not draw the guide.\n\n"
+        f"Output exactly {frames} full-body frames in one left-to-right row on flat pure "
+        f"{chroma_name} {chroma_hex}. Treat the row as {frames} invisible equal-width slots: "
+        "one centered complete pose per slot, evenly spaced, with no overlap, clipping, empty "
+        "slots, labels, or borders. Keep a clear chroma-only gap between neighboring poses so "
+        "each complete pose can be detected as a separate group without cutting through "
+        "foreground; never let two poses touch or merge into one connected silhouette.\n\n"
+        f"Identity: {contract} Same pet in every frame: {pet_notes}\n"
+        f"Style: {style_contract}\n"
+        "Animation continuity: keep apparent pet scale and baseline stable within the row "
+        "unless the state itself intentionally changes vertical position, such as `jumping`. "
+        "Move the pose within the slot instead of redrawing the pet larger or smaller frame to frame.\n"
+        "Composition: the character must fill at least 75% of the slot height. Do not leave "
+        "large empty space above, below, or around the character. The character should be "
+        "large, prominent, and clearly readable at small sizes — not small or distant.\n\n"
+        f"State action: {state_prompt}\n\n"
+        f"State requirements:\n{state_reqs_text}\n\n"
+        "Clean extraction: crisp opaque edges, safe padding, no scenery, text, guide marks, "
+        "checkerboard, shadows, glows, motion blur, speed lines, dust, detached effects, stray "
+        "pixels, or chroma-key colors inside the pet."
+    )
+
+
+def _look_cardinal_prompt_body(
+    project: PetProject,
+    request: Mapping[str, Any],
+) -> str:
+    contract = _identity_contract(project)
+    chroma = request.get("chroma_key") or {}
+    chroma_hex = chroma.get("hex", "#00FFFF")
+    chroma_name = chroma.get("name", "cyan")
+    return (
+        f"Create one horizontal four-cardinal anchor strip for Codex pet `{project.pet_id}`.\n\n"
+        f"Use the attached canonical base, completed standard contact sheet, and layout guide "
+        f"for exact identity, style, scale, baseline, face construction, materials, palette, "
+        f"markings, props, and spacing. Read `qa/look-mechanics.md` and use the pet's natural "
+        f"gaze mechanism.\n\n"
+        f"Identity: {contract}\n\n"
+        "Output exactly four centered complete full-body poses in this exact left-to-right "
+        "order: `000 up`, `090 screen-right`, `180 down`, `270 screen-left`. Screen-left and "
+        "screen-right always mean the viewer's image edges, never the character's own left or right.\n\n"
+        "For `000`, keep the face broadly frontal and point the eyes and natural head mechanism "
+        "toward the TOP edge. For `090`, put the nose tip, pupils, face surface, or natural "
+        "aiming feature on the screen-right side of the head center. For `180`, keep the face "
+        "broadly frontal and point toward the BOTTOM edge. For `270`, apply the inverse "
+        "screen-left landmark rule. Every cardinal must be unmistakable without labels.\n\n"
+        f"Place one pose in each invisible equal-width slot on a flat pure {chroma_name} {chroma_hex} "
+        "background with generous padding. Keep scale, feet/base, lower body, and registration "
+        "consistent across all four slots.\n\n"
+        "Do not rotate, skew, or tilt the whole sprite to fake gaze. Do not add replacement "
+        "eyes, labels, degree text, arrows, boxes, guide marks, shadows, scenery, detached "
+        "effects, or chroma-key colors inside the pet."
+    )
+
+
+def _look_row_prompt_body(
+    project: PetProject,
+    request: Mapping[str, Any],
+    state: str,
+) -> str:
+    contract = _identity_contract(project)
+    chroma = request.get("chroma_key") or {}
+    chroma_hex = chroma.get("hex", "#00FFFF")
+    chroma_name = chroma.get("name", "cyan")
+    row = _LOOK_ROW_NUMBERS[state]
+    directions = _LOOK_ROW_DIRECTIONS[state]
+    direction_list = ", ".join(directions)
+    reference_instruction = (
+        "The approved cardinal strip is authoritative for the up, screen-right, down, "
+        "and screen-left pose families. Interpolate the intermediate directions as "
+        "even 22.5-degree steps between those anchors."
+        if row == 9
+        else "The approved cardinal strip and completed coherent row 9 are authoritative. "
+        "Use the cardinals for direction meaning and row 9 for cross-row identity, scale, "
+        "registration, and continuity."
+    )
+    return (
+        f"Create one horizontal look-direction strip for Codex pet `{project.pet_id}`, atlas row {row}.\n\n"
+        f"Use the attached canonical base, completed standard contact sheet, layout guide, "
+        f"and approved four-cardinal strip for identity, scale, registration, spacing, "
+        f"direction semantics, and cross-row continuity. Read `qa/look-mechanics.md` and "
+        f"follow its pet-specific movement and eye/prop mechanics. {reference_instruction}\n\n"
+        f"Identity: {contract}\n\n"
+        "COHERENT SYNTHESIS LOCK: produce one unified eight-pose row. Do not paste, tile, "
+        "or independently restyle individual cells. Every final cell must be drawn together "
+        "with the same face construction, body proportions, line/render quality, lighting, "
+        "materials, scale, baseline, and registration.\n\n"
+        f"Output exactly 8 complete full-body frames in this exact left-to-right order: "
+        f"{direction_list}. Degrees are clockwise: 000 is up, 090 right, 180 down, and 270 "
+        f"left. Neutral/front is not part of this row.\n\n"
+        f"{look_row_axis_contract(row)}\n\n"
+        f"{look_row_screen_coordinate_contract(row)}\n\n"
+        f"{look_row_layout_contract()}\n\n"
+        f"Place one centered pose in each invisible equal-width slot on flat pure "
+        f"{chroma_name} {chroma_hex}. Change only the natural parts needed to express gaze: "
+        "eyes, eyelids, head, face, neck, upper body, appendages, and constrained prop "
+        "follow-through. Keep identity, silhouette, materials, palette, markings, and props "
+        "consistent.\n\n"
+        f"{look_row_boundary_contract(row)}\n\n"
+        f"{look_row_pre_return_check(row)}\n\n"
+        "Do not rotate, skew, or tilt the whole sprite to fake gaze. Do not add "
+        "replacement/googly eyes, labels, degree text, arrows, clocks, grids, shadows, "
+        "glows, scenery, detached effects, or chroma-key colors inside the pet."
+    )
+
+
+def _analysis_section(analysis_text: str) -> str:
+    if not analysis_text.strip():
+        return ""
+    return (
+        "\n\nPET-SPECIFIC DESIGN NOTES (authoritative — overrides generic guidance "
+        "where they conflict):\n"
+        f"{analysis_text.strip()}\n"
+    )
+
+
+def _design_context_section(design_context: Mapping[str, Any] | None) -> str:
+    if not design_context:
+        return ""
+    contract = design_context.get("contract")
+    storyboard = design_context.get("storyboard")
+    anchors = design_context.get("pose_anchors", ())
+    if not isinstance(contract, Mapping) or not isinstance(storyboard, Mapping):
+        raise ValueError("design context is invalid")
+    return (
+        "\n\nApproved Design Pack (authoritative):\n"
+        f"Design revision: {contract.get('design_revision')}\n"
+        f"Character construction: {json.dumps(contract.get('character_construction'), sort_keys=True)}\n"
+        f"Asymmetry contract: {json.dumps(contract.get('asymmetries'), sort_keys=True)}\n"
+        f"State grammar: {json.dumps(contract.get('state_grammar'), sort_keys=True)}\n"
+        f"Prohibited strategies: {json.dumps(contract.get('prohibited_strategies'), sort_keys=True)}\n"
+        f"Storyboard: {json.dumps(storyboard.get('states'), sort_keys=True)}\n"
+        f"Approved pose anchors: {', '.join(str(item) for item in anchors)}\n"
+        "Use attached approved pose anchors for identity, pose, silhouette, and view evidence.\n"
+    )
+
+
+def build_current_prompts(
+    project: PetProject,
+    request: Mapping[str, Any],
+    *,
+    analysis_text: str = "",
+    design_context: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    contract = _identity_contract(project)
+    pet_notes = request.get("pet_notes") or _current_pet_notes(project)
+    analysis = _analysis_section(analysis_text)
+    design = _design_context_section(design_context)
     prompts = {
-        "base-pet.md": f"# {project.display_name} Base\n\n{contract}\n\nUse the durable brief: {_current_pet_notes(project)}\n",
-        "look-cardinals.md": f"# look-cardinals\n\n{contract}\n\nRender up, screen-right, down, and screen-left anchors.\n",
+        "base-pet.md": f"# {project.display_name} Base\n\n{contract}\n\nUse the durable brief: {pet_notes}\n",
     }
-    for state, action in rows.items():
-        body = f"# {state}\n\n{contract}\n\nState action: {action}\n"
+    for state in _STANDARD_ROW_STATES:
+        body = _row_prompt_body(project, request, state) + analysis + design
+        prompts[f"rows/{state}.md"] = body
+        prompts[f"row-retries/{state}.md"] = (
+            body + "\nRetry by correcting the complete coherent strip without changing identity.\n"
+        )
+    cardinal_body = _look_cardinal_prompt_body(project, request) + analysis
+    prompts["look-cardinals.md"] = cardinal_body
+    prompts["look-cardinals-retry.md"] = (
+        cardinal_body + "\nRetry by correcting the complete four-cardinal strip without changing identity.\n"
+    )
+    for state in _LOOK_ROW_ACTIONS:
+        body = _look_row_prompt_body(project, request, state) + analysis
         prompts[f"rows/{state}.md"] = body
         prompts[f"row-retries/{state}.md"] = (
             body + "\nRetry by correcting the complete coherent strip without changing identity.\n"
@@ -1177,11 +1545,11 @@ def _validate_references(project: PetProject, run_dir: Path) -> None:
             raise ValueError("missing run metadata")
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         expected = _reference_metadata(project, run_dir)
-        if metadata != {
-            "schema_version": 1,
-            "pet_id": project.pet_id,
-            "references": expected,
-        }:
+        if (
+            metadata.get("schema_version") != 1
+            or metadata.get("pet_id") != project.pet_id
+            or metadata.get("references") != expected
+        ):
             raise ValueError("run reference mapping changed")
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
         raise RunPreparationError("run references are invalid") from None

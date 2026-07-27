@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -51,7 +52,8 @@ from omnipet.hatch.inspect import (
 )
 from omnipet.openai_images import OpenAIImageError, OpenAIImageGenerator
 from omnipet.package import PackageError, build_package_evidence, import_package_verdict
-from omnipet.project import PetProject, load_pet_project
+from omnipet.project import PetProject, PetReference, load_pet_project
+from omnipet.prototype_jobs import generate_next_prototype, prototype_job_status
 from omnipet.run import EXPECTED_JOB_IDS, STANDARD_JOB_IDS, prepare_run
 from omnipet.workflow import (
     WorkflowState,
@@ -59,8 +61,11 @@ from omnipet.workflow import (
     clear_blocked,
     mark_blocked,
     refresh_workflow,
+    load_workflow_v2,
+    WorkflowError,
 )
 from omnipet.workflow import _approve_workflow_stage_unlocked, _refresh_workflow_unlocked, _workflow_lock
+from omnipet.workflow import _fsync_directory, _write_workflow_v2_unlocked
 
 
 GeneratorFactory = Callable[[PetProject], Any]
@@ -82,6 +87,184 @@ class JobGenerationError(RuntimeError):
         self.job_id = job_id
         self.code = code
         self.diagnostic = diagnostic
+
+
+def hatch_prototype_run(run_dir: Path, generator: Any) -> dict[str, Any] | None:
+    path = Path(run_dir).absolute()
+    try:
+        state = load_workflow_v2(path)
+    except WorkflowError:
+        from omnipet.prototype_jobs import PrototypeJobError
+
+        raise PrototypeJobError("prototype job validation failed") from None
+    if state.state != "prototyping":
+        raise ValueError("run is not prototyping")
+    return generate_next_prototype(path, generator)
+
+
+def hatch_prototype_run_action(
+    run_dir: Path, generator: Any, *, action_id: str, run_revision: str,
+) -> dict[str, Any] | None:
+    path = Path(run_dir).absolute()
+    return generate_next_prototype(
+        path, generator, action_id=action_id, run_revision=run_revision
+    )
+
+
+def prototype_run_status(run_dir: Path) -> dict[str, Any]:
+    path = Path(run_dir).absolute()
+    state = load_workflow_v2(path)
+    if state.state != "prototyping":
+        raise ValueError("run is not prototyping")
+    status = prototype_job_status(path)
+    return {**status, "ready_id": status["ready_ids"][0] if status["ready_ids"] else None}
+
+
+def initialize_design_run(
+    run_dir: Path,
+    pet_id: str,
+    references: tuple[PetReference, ...] = (),
+) -> WorkflowState:
+    destination = Path(run_dir).absolute()
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", pet_id):
+        raise ValueError("invalid pet id")
+    if destination.is_symlink():
+        raise ValueError("run destination is unsafe")
+    if destination.exists():
+        raise FileExistsError("run destination already exists")
+    parent = destination.parent
+    if parent.is_symlink() or not parent.is_dir() or parent.resolve() != parent.absolute():
+        raise ValueError("run destination parent is unsafe")
+    validated = []
+    for reference in references:
+        if not isinstance(reference, PetReference):
+            raise ValueError("reference is invalid")
+        source = Path(reference.path).absolute()
+        if (
+            source.is_symlink()
+            or not source.is_file()
+            or source.resolve() != source
+            or not isinstance(reference.role, str)
+            or not reference.role.strip()
+        ):
+            raise ValueError("reference is unsafe")
+        source_stat = source.stat()
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValueError("reference is unsafe")
+        validated.append((
+            source,
+            reference.role.strip(),
+            source.suffix.lower() or ".png",
+            (source_stat.st_dev, source_stat.st_ino),
+        ))
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=parent))
+    try:
+        for relative in ("design", "decoded/prototypes", "qa/design-pack", "references"):
+            (staging / relative).mkdir(parents=True)
+        records = []
+        for index, (source, role, suffix, identity) in enumerate(validated, 1):
+            snapshot = staging / "references" / f"reference-{index:02d}{suffix}"
+            digest = _snapshot_reference(source, snapshot, identity)
+            records.append({
+                "run_path": str(snapshot.relative_to(staging)),
+                "role": role,
+                "sha256": digest,
+            })
+        _write_json(staging / "omnipet-run.json", {
+            "schema_version": 2,
+            "pet_id": pet_id,
+            "design_revision": "design-0001",
+            "references": records,
+        })
+        state = WorkflowState("intake")
+        _write_workflow_v2_unlocked(staging, state)
+        for directory in (
+            staging / "design",
+            staging / "decoded/prototypes",
+            staging / "decoded",
+            staging / "qa/design-pack",
+            staging / "qa",
+            staging / "references",
+            staging,
+        ):
+            _fsync_directory(directory)
+        _publish_design_run(staging, destination)
+        return state
+    except Exception:
+        raise
+    finally:
+        if staging.is_dir() and not staging.is_symlink():
+            shutil.rmtree(staging)
+
+
+def _publish_design_run(staging: Path, destination: Path) -> None:
+    os.replace(staging, destination)
+    try:
+        _fsync_directory(destination.parent)
+    except OSError:
+        try:
+            os.replace(destination, staging)
+            try:
+                _fsync_directory(destination.parent)
+            except OSError:
+                pass
+        except OSError:
+            try:
+                _remove_published_design_run(destination)
+            except (OSError, ValueError):
+                raise ValueError("design run recovery required") from None
+            try:
+                _fsync_directory(destination.parent)
+            except OSError:
+                pass
+            raise ValueError("design run initialization failed") from None
+        raise
+
+
+def _remove_published_design_run(destination: Path) -> None:
+    path = Path(destination).absolute()
+    if (
+        path != destination
+        or path.is_symlink()
+        or not path.is_dir()
+        or path.resolve() != path
+        or path.parent.is_symlink()
+        or path.parent.resolve() != path.parent
+    ):
+        raise ValueError("published run path is unsafe")
+    shutil.rmtree(path)
+
+
+def _snapshot_reference(
+    source: Path,
+    destination: Path,
+    expected_identity: tuple[int, int],
+) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    source_descriptor = os.open(source, flags)
+    try:
+        source_stat = os.fstat(source_descriptor)
+        if (
+            not stat.S_ISREG(source_stat.st_mode)
+            or (source_stat.st_dev, source_stat.st_ino) != expected_identity
+        ):
+            raise ValueError("reference changed during snapshot")
+        descriptor, name = tempfile.mkstemp(prefix=f".{destination.name}-", dir=destination.parent)
+        temporary = Path(name)
+        digest = hashlib.sha256()
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                while chunk := os.read(source_descriptor, 1024 * 1024):
+                    output.write(chunk)
+                    digest.update(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, destination)
+            return digest.hexdigest()
+        finally:
+            temporary.unlink(missing_ok=True)
+    finally:
+        os.close(source_descriptor)
 
 
 def init_pet_project(repo_root: Path, pet_id: str, *, standalone: Path | None = None) -> Path:
@@ -117,11 +300,53 @@ def init_pet_project(repo_root: Path, pet_id: str, *, standalone: Path | None = 
 def hatch_project(
     project: PetProject,
     *,
+    action_id: str | None = None,
+    run_revision: str | None = None,
     generator_factory: GeneratorFactory = lambda project: OpenAIImageGenerator(
         model=project.image_generation_model, quality=project.image_generation_quality
     ),
 ) -> WorkflowState:
     with _hatch_lock(project):
+        run_dir = project.repository_root / ".omnipet/runs" / project.pet_id
+        if not run_dir.exists():
+            run_dir.parent.mkdir(parents=True, exist_ok=True)
+            if project.agent_workflow_version == 2:
+                return initialize_design_run(run_dir, project.pet_id, project.references)
+        try:
+            workflow_document = _read_json(run_dir / "workflow.json")
+        except (OSError, ValueError):
+            workflow_document = None
+        if isinstance(workflow_document, dict) and workflow_document.get("schema_version") == 2:
+            workflow = load_workflow_v2(run_dir)
+            if workflow.state in {"intake", "designing"}:
+                return workflow
+            if workflow.state in {"prototyping", "producing_directions"}:
+                from omnipet.actions import ActionError, validate_action_request
+                expected_kind = {
+                    "prototyping": "generate-prototype",
+                    "producing_directions": "hatch-direction",
+                }[workflow.state]
+                if action_id is None or run_revision is None:
+                    raise ActionError("action request is invalid")
+                validate_action_request(
+                    run_dir, action_id, run_revision, expected_kind,
+                )
+            if workflow.state == "prototyping":
+                generator = generator_factory(project)
+                hatch_prototype_run_action(
+                    run_dir, generator, action_id=action_id,
+                    run_revision=run_revision,
+                )
+                return load_workflow_v2(run_dir)
+            if workflow.state == "producing_standard_rows":
+                if action_id is None or run_revision is None:
+                    from omnipet.actions import ActionError
+                    raise ActionError("action request is invalid")
+                return generate_next_standard_row_v2(
+                    project, run_dir, generator_factory,
+                    action_id=action_id, run_revision=run_revision,
+                )
+            return workflow
         run_dir = prepare_run(project, project.repository_root).run_dir
         return _hatch_project_locked(project, run_dir, generator_factory)
 
@@ -139,17 +364,18 @@ def _hatch_project_locked(
             return workflow
         if workflow.state == "preparing":
             active_job = "base"
-        elif workflow.state == "generating_standard_rows":
+        elif workflow.state in {"generating_standard_rows", "producing_standard_rows"}:
             active_job = _next_pending(run_dir, STANDARD_JOB_IDS)
         elif workflow.state == "generating_directions":
             active_job = _direction_action(run_dir)
         generator = generator_factory(project) if active_job is not None else None
         if workflow.state == "preparing":
             return _generate_base_candidate(project, run_dir, generator)
-        if workflow.state == "generating_standard_rows":
+        if workflow.state in {"generating_standard_rows", "producing_standard_rows"}:
             _generate_standard_rows(project, run_dir, generator)
             active_job = None
-            _qa_standard(run_dir)
+            if workflow.state == "generating_standard_rows":
+                _qa_standard(run_dir)
         elif workflow.state == "generating_directions":
             if active_job is not None:
                 _generate_direction_action(project, run_dir, generator, active_job)
@@ -373,6 +599,28 @@ def _clear_project_block_locked(run_dir: Path) -> WorkflowState:
 
 def project_status(project: PetProject) -> dict[str, Any]:
     run_dir = project.repository_root / ".omnipet" / "runs" / project.pet_id
+    if run_dir.is_dir():
+        try:
+            workflow_document = _read_json(run_dir / "workflow.json")
+        except (OSError, ValueError):
+            workflow_document = None
+        if isinstance(workflow_document, dict) and workflow_document.get("schema_version") == 2:
+            from omnipet.actions import build_action_contract
+            selector = "." if project.root == project.repository_root else project.pet_id
+            contract = build_action_contract(run_dir, selector)
+            first = contract["actions"][0] if contract["actions"] else None
+            return {
+                "ok": True,
+                "pet_id": project.pet_id,
+                "run_dir": str(run_dir),
+                "workflow_state": contract["state"],
+                "action_contract_version": contract["action_contract_version"],
+                "run_revision": contract["run_revision"],
+                "actions": contract["actions"],
+                "budget": contract["budget"],
+                "next_action": " ".join(first["command"]) if first is not None else "none",
+                "blocked": workflow_document.get("blocked"),
+            }
     state = refresh_workflow(run_dir) if run_dir.is_dir() else WorkflowState("preparing")
     phase = _direction_phase(run_dir) if state.state in {
         "generating_directions", "awaiting_directions_approval"
@@ -508,6 +756,18 @@ def _promote_base_candidate(project: PetProject, run_dir: Path) -> None:
 
 
 def _generate_standard_rows(project: PetProject, run_dir: Path, generator: Any) -> None:
+    manifest = _read_json(run_dir / "imagegen-jobs.json")
+    workflow = _read_json(run_dir / "workflow.json")
+    phase2 = (
+        manifest.get("schema_version") == 2
+        or workflow.get("state") == "producing_standard_rows"
+    )
+    if phase2:
+        from omnipet.design_pack import DesignPackError, _validate_current_design_pack_approval
+        try:
+            _validate_current_design_pack_approval(run_dir)
+        except DesignPackError:
+            raise ValueError("design pack approval is invalid") from None
     for job_id in STANDARD_JOB_IDS:
         if _job(run_dir, job_id)["status"] == "complete":
             continue
@@ -521,6 +781,62 @@ def _generate_standard_rows(project: PetProject, run_dir: Path, generator: Any) 
                 job_id, "generation-failed",
                 _exception_diagnostic(error, "deterministic-qa"),
             ) from None
+
+
+def generate_next_standard_row_v2(
+    project: PetProject,
+    run_dir: Path,
+    generator_factory: GeneratorFactory,
+    *,
+    action_id: str,
+    run_revision: str,
+) -> WorkflowState:
+    from omnipet.actions import validate_action_request_unlocked
+    from omnipet.design_pack import (
+        DesignPackError, _validate_current_design_pack_approval,
+    )
+
+    _standard_row_dispatch_boundary()
+    with _workflow_lock(run_dir):
+        validate_action_request_unlocked(
+            run_dir, action_id, run_revision, "hatch-standard-row"
+        )
+        try:
+            _validate_current_design_pack_approval(run_dir)
+        except DesignPackError:
+            raise ValueError("design pack approval is invalid") from None
+        manifest = _read_json(run_dir / "imagegen-jobs.json")
+        pending = [job for job in manifest["jobs"] if job.get("status") == "pending"]
+        if not pending:
+            raise ValueError("standard row action is unavailable")
+        job_id = pending[0]["id"]
+        try:
+            generator = generator_factory(project)
+            source = _generate_source(project, run_dir, generator, job_id)
+            _stage_generated_row(run_dir, job_id, source)
+            return WorkflowState("producing_standard_rows")
+        except Exception as error:
+            if _job(run_dir, job_id)["status"] == "running":
+                _fail_job(run_dir, job_id)
+                _write_json(run_dir / "workflow.json", {
+                    "schema_version": 2,
+                    "state": "blocked",
+                    "blocked": {
+                        "code": "standard-row-generation-failed",
+                        "prior_state": "producing_standard_rows",
+                        "job_id": job_id,
+                        "evidence_path": None,
+                        "root_failure_key": "standard-row-generation-failed",
+                        "recoveries": [],
+                        "diagnostic": None,
+                    },
+                })
+                return WorkflowState("blocked", _read_json(run_dir / "workflow.json")["blocked"])
+            raise error
+
+
+def _standard_row_dispatch_boundary() -> None:
+    pass
 
 
 def _generate_direction_action(project: PetProject, run_dir: Path, generator: Any, job_id: str) -> None:
@@ -603,12 +919,25 @@ def _validate_manifest_inputs(run_dir: Path, job_id: str, job: dict[str, Any]) -
     values = job.get("input_images")
     if not isinstance(values, list):
         raise ValueError("job inputs are invalid")
+    phase2 = "design_pack_sha256" in job
     for item in values:
-        if not isinstance(item, dict) or set(item) != {"path", "role"} or not isinstance(item["role"], str) or not item["role"].strip():
+        expected_keys = {"path", "role", "sha256"} if phase2 else {"path", "role"}
+        if not isinstance(item, dict) or set(item) != expected_keys or not isinstance(item["role"], str) or not item["role"].strip():
             raise ValueError("job input record is invalid")
         path = item.get("path")
         if not isinstance(path, str) or Path(path).is_absolute() or ".." in Path(path).parts:
             raise ValueError("job input path is invalid")
+        if phase2:
+            source = _safe_run_file(run_dir, path)
+            if item["sha256"] != _sha256(source):
+                raise ValueError("job input changed")
+            if not (
+                path.startswith("references/reference-")
+                or path == "decoded/canonical.png"
+                or path.startswith("decoded/prototypes/")
+            ):
+                raise ValueError("unexpected job input path")
+            continue
         if path.startswith("references/reference-"):
             _safe_run_file(run_dir, path)
         elif path.startswith("references/layout-guides/"):
@@ -633,6 +962,10 @@ def _validate_manifest_inputs(run_dir: Path, job_id: str, job: dict[str, Any]) -
     expected_references = {item["run_path"] for item in metadata["references"]}
     if not expected_references.issubset(paths):
         raise ValueError("prepared reference input is missing")
+    if phase2:
+        if "decoded/canonical.png" not in paths:
+            raise ValueError("approved canonical input is missing")
+        return
     if job_id != "base":
         required = {
             f"references/layout-guides/{job_id}.png",
@@ -655,6 +988,12 @@ def _grounding(
     job_id: str,
     guide_records: tuple[dict[str, str], ...] | None = None,
 ) -> tuple[GroundingImage, ...]:
+    job = _job(run_dir, job_id)
+    if "design_pack_sha256" in job:
+        return tuple(
+            _snapshot(_safe_run_file(run_dir, item["path"]), item["role"])
+            for item in job["input_images"]
+        )
     paths: list[tuple[Path, str]] = []
     metadata = _read_json(run_dir / "omnipet-run.json")
     references = []

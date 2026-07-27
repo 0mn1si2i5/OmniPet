@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/look-mechanics-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pet_id", "design_revision", "parts", "cardinal_families", "occlusion_rules"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pet_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "design_revision": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "parts": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["part", "mechanic"], "properties": {"part": {"type": "string", "minLength": 1}, "mechanic": {"type": "string", "enum": ["anchored", "leading", "following", "occluding", "trailing"]}}}},
+    "cardinal_families": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["000", "090", "180", "270"],
+      "properties": {
+        "000": {"type": "object", "additionalProperties": false, "required": ["pose_id", "method", "anchored_parts", "leading_parts", "trailing_parts"], "properties": {"pose_id": {"type": "string", "minLength": 1}, "method": {"type": "string", "enum": ["independent", "derived", "approved-family"]}, "anchored_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "leading_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "trailing_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+        "090": {"type": "object", "additionalProperties": false, "required": ["pose_id", "method", "anchored_parts", "leading_parts", "trailing_parts"], "properties": {"pose_id": {"type": "string", "minLength": 1}, "method": {"type": "string", "enum": ["independent", "derived", "approved-family"]}, "anchored_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "leading_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "trailing_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+        "180": {"type": "object", "additionalProperties": false, "required": ["pose_id", "method", "anchored_parts", "leading_parts", "trailing_parts"], "properties": {"pose_id": {"type": "string", "minLength": 1}, "method": {"type": "string", "enum": ["independent", "derived", "approved-family"]}, "anchored_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "leading_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "trailing_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+        "270": {"type": "object", "additionalProperties": false, "required": ["pose_id", "method", "anchored_parts", "leading_parts", "trailing_parts"], "properties": {"pose_id": {"type": "string", "minLength": 1}, "method": {"type": "string", "enum": ["independent", "derived", "approved-family"]}, "anchored_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "leading_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}, "trailing_parts": {"type": "array", "items": {"type": "string", "minLength": 1}}}}
+      }
+    },
+    "occlusion_rules": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

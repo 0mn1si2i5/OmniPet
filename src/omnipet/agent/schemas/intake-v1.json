@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/intake-v1.json",
+  "schema_version": 1,
+  "x-omnipet-runtime-validation": ["fact-values-unique-across-categories", "credential-like-sensitive-text-rejected", "reference-path-normalized-and-safe", "reference-records-match-run-metadata-and-snapshot-bytes", "exact-python-types-reject-boolean-numbers", "reference-path-uniqueness"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pet_id", "design_revision", "references", "rights", "budget", "style_request", "observed_facts", "inferred_facts", "unknowns", "accepted_defaults", "owner_decisions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pet_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "design_revision": {"type": "string", "pattern": "^design-[0-9]{4}$"},
+    "references": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["path", "role", "sha256"], "properties": {"path": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*\\\\)[^\\x00-\\x1f\\x7f]+$"}, "role": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
+    "rights": {"type": "object", "additionalProperties": false, "required": ["status", "note"], "properties": {"status": {"const": "declared"}, "note": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}}},
+    "budget": {"type": "object", "additionalProperties": false, "required": ["authorized_usd", "estimated_provider_calls"], "properties": {"authorized_usd": {"type": "number", "exclusiveMinimum": 0}, "estimated_provider_calls": {"type": "integer", "minimum": 1}}},
+    "style_request": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"},
+    "observed_facts": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}},
+    "inferred_facts": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}},
+    "unknowns": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}},
+    "accepted_defaults": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}},
+    "owner_decisions": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"}}
+  }
+}

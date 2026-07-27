@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/prototype-plan-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pet_id", "design_revision", "prototypes", "exceptions", "estimated_provider_calls"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pet_id": {"type": "string", "minLength": 1},
+    "design_revision": {"type": "string", "minLength": 1},
+    "prototypes": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pose_id", "evidence_kind", "covers_requirements", "purpose", "generation_method", "reference_roles"],
+        "properties": {
+          "pose_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=[^\\x00-\\x1F\\x7F]+$)(?!(?:base|idle|running-right|running-left|waving|jumping|failed|waiting|running|review|look-cardinals|look-row-9|look-row-10)$)[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "evidence_kind": {"oneOf": [{"type": "string", "enum": ["animation-ready-canonical", "motion-cycle", "screen-left-anchor", "screen-right-anchor", "stable-attachment", "grounded-anticipation", "airborne", "return-pose"]}, {"type": "string", "pattern": "^(?:state-extreme-anchor|unsupported-view-anchor):[a-z0-9]+(?:-[a-z0-9]+)*$"}]},
+          "covers_requirements": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"oneOf": [{"type": "string", "enum": ["animation-ready-canonical", "motion-cycle", "screen-left-anchor", "screen-right-anchor", "stable-attachment", "grounded-anticipation", "airborne", "return-pose"]}, {"type": "string", "pattern": "^(?:state-extreme-anchor|unsupported-view-anchor):[a-z0-9]+(?:-[a-z0-9]+)*$"}]}},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+          "generation_method": {"type": "string", "enum": ["generate"]},
+          "reference_roles": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"}}
+        }
+      }
+    },
+    "exceptions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["risk", "omitted_requirement_id", "rationale", "substitute_pose_ids", "reviewer_principal_id"],
+        "properties": {
+          "risk": {"type": "string", "enum": ["directional_motion", "unsafe_mirror", "compound_character", "airborne_state", "state_extreme", "unsupported_reference_view"]},
+          "omitted_requirement_id": {"oneOf": [{"type": "string", "enum": ["animation-ready-canonical", "motion-cycle", "screen-left-anchor", "screen-right-anchor", "stable-attachment", "grounded-anticipation", "airborne", "return-pose"]}, {"type": "string", "pattern": "^(?:state-extreme-anchor|unsupported-view-anchor):[a-z0-9]+(?:-[a-z0-9]+)*$"}]},
+          "rationale": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+          "substitute_pose_ids": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"}},
+          "reviewer_principal_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"}
+        }
+      }
+    },
+    "estimated_provider_calls": {"type": "integer", "minimum": 0}
+  },
+  "x-omnipet-runtime-validation": ["credential-like-sensitive-text-rejected", "identity-matches-intake-and-run", "unique-pose-ids-and-evidence-kinds", "estimated-provider-calls-equals-generate-method-count", "exceptions-reference-existing-purpose-covering-substitutes", "unsafe-mirror-requires-independent-left-and-right"]
+}

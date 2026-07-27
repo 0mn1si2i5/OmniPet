@@ -19,6 +19,7 @@ from omnipet.run import (
     load_run_state,
     prepare_run,
 )
+from omnipet.release import hatch_project
 
 
 JOB_IDS = EXPECTED_JOB_IDS
@@ -131,6 +132,44 @@ approved:
             [{"aspect_ratio": "1:1", "image_size": "1K"}]
             + [{"aspect_ratio": "21:9", "image_size": "2K"}] * 12,
         )
+
+    def test_v2_prepare_initializes_design_run_without_legacy_jobs_and_hatch_stays_v2(self):
+        manifest = self.root / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  minimum_sprite_version: 2\n",
+                "  minimum_sprite_version: 2\n  agent_workflow_version: 2\n",
+            ),
+            encoding="utf-8",
+        )
+        project = load_pet_project(self.root, ".")
+
+        with patch("omnipet.run.prepare_hatch_run", side_effect=AssertionError("legacy prepare called")):
+            state = prepare_run(project, self.root)
+
+        run_dir = self.root / ".omnipet/runs/ember"
+        self.assertEqual(state.state, "intake")
+        self.assertFalse((run_dir / "imagegen-jobs.json").exists())
+        with patch("omnipet.release.OpenAIImageGenerator", side_effect=AssertionError("provider called")):
+            self.assertEqual(hatch_project(project).state, "intake")
+        self.assertEqual(json.loads((run_dir / "workflow.json").read_text())["schema_version"], 2)
+
+    def test_v2_prepare_cli_returns_workflow_state_without_jobs_or_provider(self):
+        manifest = self.root / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  minimum_sprite_version: 2\n",
+                "  minimum_sprite_version: 2\n  agent_workflow_version: 2\n",
+            ),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with patch("omnipet.run.prepare_hatch_run", side_effect=AssertionError("legacy prepare called")), redirect_stdout(stdout):
+            result = main(["run", "prepare", ".", "--repo-root", str(self.root)])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["workflow_state"], "intake")
+        self.assertFalse((self.root / ".omnipet/runs/ember/imagegen-jobs.json").exists())
 
     def test_prepare_failure_is_sanitized_and_removes_partial_run(self):
         secret = "private-runtime-detail"

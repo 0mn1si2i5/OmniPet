@@ -80,6 +80,75 @@ class StageApproval:
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class DesignPackApproval:
+    stage: str
+    artifacts: tuple[ArtifactHash, ...]
+    approved_at: str
+    owner_principal_id: str
+    note: str | None = None
+
+
+def load_design_pack_approvals(run_dir: Path) -> tuple[DesignPackApproval, ...]:
+    run_dir = _validated_run_dir(run_dir)
+    path = run_dir / "qa" / "approvals-v2.json"
+    if not path.exists():
+        return ()
+    try:
+        data = _read_json_object(path)
+        if set(data) != {"schema_version", "approvals"} or data["schema_version"] != 2:
+            raise ValueError("design approval document is invalid")
+        values = data["approvals"]
+        if not isinstance(values, list) or len(values) > 1:
+            raise ValueError("design approvals are invalid")
+        return tuple(_parse_design_pack_approval(item) for item in values)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise ApprovalError("design pack approvals are invalid") from None
+
+
+def _parse_design_pack_approval(value: Any) -> DesignPackApproval:
+    required = {"stage", "artifacts", "approved_at", "owner_principal_id"}
+    if not isinstance(value, dict) or set(value) not in (required, required | {"note"}):
+        raise ValueError("design approval is invalid")
+    if value["stage"] != "design-pack" or not _valid_utc_timestamp(value["approved_at"]):
+        raise ValueError("design approval is invalid")
+    owner = value["owner_principal_id"]
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError("design approval owner is invalid")
+    note = value.get("note")
+    if note is not None and (not isinstance(note, str) or not note.strip()):
+        raise ValueError("design approval note is invalid")
+    artifacts = value["artifacts"]
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError("design approval artifacts are invalid")
+    parsed = []
+    for item in artifacts:
+        if not isinstance(item, dict) or set(item) != _ARTIFACT_KEYS:
+            raise ValueError("design approval artifact is invalid")
+        if not _safe_relative(item["path"]) or not _valid_sha(item["sha256"]):
+            raise ValueError("design approval artifact is invalid")
+        parsed.append(ArtifactHash(item["path"], item["sha256"]))
+    if [item.path for item in parsed] != sorted({item.path for item in parsed}):
+        raise ValueError("design approval artifacts are invalid")
+    return DesignPackApproval("design-pack", tuple(parsed), value["approved_at"], owner, note)
+
+
+def _write_design_pack_approval(run_dir: Path, record: DesignPackApproval) -> None:
+    payload = {
+        "schema_version": 2,
+        "approvals": [{
+            "stage": record.stage,
+            "artifacts": [
+                {"path": item.path, "sha256": item.sha256} for item in record.artifacts
+            ],
+            "approved_at": record.approved_at,
+            "owner_principal_id": record.owner_principal_id,
+            **({"note": record.note} if record.note is not None else {}),
+        }],
+    }
+    _atomic_json(run_dir / "qa" / "approvals-v2.json", payload)
+
+
 def load_approvals(run_dir: Path) -> tuple[StageApproval, ...]:
     run_dir = _validated_run_dir(run_dir)
     path = run_dir / "qa" / "approvals.json"

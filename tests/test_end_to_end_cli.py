@@ -56,6 +56,15 @@ class GuidedCliTests(unittest.TestCase):
             result = main(argv)
         return result, stdout.getvalue(), stderr.getvalue()
 
+    def use_legacy_workflow(self, pet_id):
+        manifest = self.root / "pets" / pet_id / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  agent_workflow_version: 2\n", ""
+            ),
+            encoding="utf-8",
+        )
+
     def test_pet_init_and_status_are_public_commands(self):
         result, stdout, stderr = self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
         self.assertEqual((result, stderr), (0, ""))
@@ -67,19 +76,7 @@ class GuidedCliTests(unittest.TestCase):
         with patch("omnipet.release.OpenAIImageGenerator", return_value=CliGenerator()):
             result, stdout, stderr = self.call(["hatch", "cli-pet", "--repo-root", str(self.root)])
         self.assertEqual((result, stderr), (0, ""))
-        self.assertEqual(json.loads(stdout)["workflow_state"], "awaiting_base_approval")
-
-        result, stdout, stderr = self.call([
-            "qa", "cli-pet", "--stage", "base", "--repo-root", str(self.root)
-        ])
-        self.assertEqual((result, stderr), (0, ""))
-        self.assertEqual(json.loads(stdout)["workflow_state"], "awaiting_base_approval")
-
-        result, stdout, stderr = self.call([
-            "approve", "cli-pet", "--stage", "base", "--repo-root", str(self.root)
-        ])
-        self.assertEqual((result, stderr), (0, ""))
-        self.assertEqual(json.loads(stdout)["workflow_state"], "generating_standard_rows")
+        self.assertEqual(json.loads(stdout)["workflow_state"], "intake")
 
     def test_hatch_approve_and_qa_dispatch_and_sanitize_errors(self):
         self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
@@ -130,21 +127,17 @@ class GuidedCliTests(unittest.TestCase):
         generator = CliGenerator(fail=True)
 
         with patch("omnipet.release.OpenAIImageGenerator", return_value=generator):
-            result, _stdout, _stderr = self.call([
+            result, stdout, stderr = self.call([
                 "hatch", "cli-pet", "--repo-root", str(self.root)
             ])
-            self.assertEqual(result, 1)
-            result, _stdout, _stderr = self.call([
+            self.assertEqual((result, stderr), (0, ""))
+            self.assertEqual(json.loads(stdout)["workflow_state"], "intake")
+            result, stdout, stderr = self.call([
                 "hatch", "cli-pet", "--repo-root", str(self.root)
             ])
-        self.assertEqual(result, 1)
-        self.assertEqual(generator.calls, 1)
-
-        result, stdout, stderr = self.call([
-            "hatch", "cli-pet", "--reset-failed", "base", "--repo-root", str(self.root)
-        ])
         self.assertEqual((result, stderr), (0, ""))
-        self.assertEqual(json.loads(stdout)["workflow_state"], "preparing")
+        self.assertEqual(json.loads(stdout)["workflow_state"], "intake")
+        self.assertEqual(generator.calls, 0)
 
     def test_clear_block_and_reset_are_mutually_exclusive_and_sanitized(self):
         self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
@@ -162,6 +155,7 @@ class GuidedCliTests(unittest.TestCase):
 
     def test_clear_block_command_clears_only_real_aggregate_block(self):
         self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
+        self.use_legacy_workflow("cli-pet")
         project = load_pet_project(self.root, "cli-pet")
         run_dir = prepare_run(project, self.root).run_dir
         manifest_before = (run_dir / "imagegen-jobs.json").read_bytes()
@@ -279,6 +273,7 @@ class GuidedCliTests(unittest.TestCase):
 
     def test_package_check_rejection_is_nonzero_and_read_only(self):
         self.call(["pet", "init", "cli-pet", "--repo-root", str(self.root)])
+        self.use_legacy_workflow("cli-pet")
         project = load_pet_project(self.root, "cli-pet")
         run_dir = prepare_run(project, self.root).run_dir
         before = tuple((str(path.relative_to(self.root)), path.stat().st_mtime_ns, path.read_bytes()) for path in sorted(self.root.rglob("*")) if path.is_file())

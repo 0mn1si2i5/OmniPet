@@ -80,18 +80,50 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.project_root = init_pet_project(self.root, "my-pet")
+        manifest = self.project_root / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  agent_workflow_version: 2\n", ""
+            ),
+            encoding="utf-8",
+        )
         self.project = load_pet_project(self.root, "my-pet")
 
     def test_init_is_safe_and_customizes_template(self):
         self.assertEqual(self.project_root, self.root / "pets" / "my-pet")
         self.assertEqual(load_pet_project(self.root, "my-pet").references, ())
         self.assertIn("id: my-pet", (self.project_root / "pet.yaml").read_text(encoding="utf-8"))
+        initialized = init_pet_project(self.root, "template-pet")
+        self.assertEqual(
+            load_pet_project(self.root, "template-pet").agent_workflow_version,
+            2,
+        )
+        self.assertIn(
+            "agent_workflow_version: 2",
+            (initialized / "pet.yaml").read_text(encoding="utf-8"),
+        )
         with self.assertRaises(FileExistsError):
             init_pet_project(self.root, "my-pet")
         with self.assertRaises(ValueError):
             init_pet_project(self.root, "../escape")
         with self.assertRaises(ValueError):
             init_pet_project(self.root, "bad\nid")
+
+    def test_first_hatch_for_legacy_project_uses_phase1(self):
+        manifest = self.project_root / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  agent_workflow_version: 2\n", ""
+            ),
+            encoding="utf-8",
+        )
+        project = load_pet_project(self.root, "my-pet")
+        generator = FakeGenerator()
+
+        result = hatch_project(project, generator_factory=lambda _project: generator)
+
+        self.assertEqual(result.state, "awaiting_base_approval")
+        self.assertEqual(generator.calls, ["base"])
 
     def test_init_rolls_back_destination_when_validation_fails(self):
         with patch("omnipet.release.load_pet_project", side_effect=ValueError("invalid")):

@@ -338,7 +338,14 @@ class GenerationDiagnosticTests(unittest.TestCase):
         return prepare_run(project, self.root).run_dir
 
     def _project(self, pet_id="my-pet"):
-        init_pet_project(self.root, pet_id)
+        root = init_pet_project(self.root, pet_id)
+        manifest = root / "pet.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "  agent_workflow_version: 2\n", ""
+            ),
+            encoding="utf-8",
+        )
         return load_pet_project(self.root, pet_id)
 
 

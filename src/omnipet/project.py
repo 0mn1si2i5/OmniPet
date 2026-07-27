@@ -63,6 +63,7 @@ class PetProject:
     image_generation_quality: str
     image_generation_deprecated: bool
     minimum_sprite_version: int
+    agent_workflow_version: int
     hatch_engine_requirements: Mapping[str, Any]
     spritesheet_path: Path
     manifest_path: Path
@@ -146,11 +147,14 @@ def load_pet_project(repo_root: Path, pet_id_or_path: str | Path) -> PetProject:
     minimum_sprite_version = hatch_engine.get("minimum_sprite_version")
     if type(minimum_sprite_version) is not int or minimum_sprite_version < 2:
         raise ProjectValidationError("invalid hatch engine")
+    agent_workflow_version = hatch_engine.get("agent_workflow_version", 1)
+    if type(agent_workflow_version) is not int or agent_workflow_version not in {1, 2}:
+        raise ProjectValidationError("invalid hatch engine")
 
     hatch_requirements = {
         key: value
         for key, value in hatch_engine.items()
-        if key != "minimum_sprite_version"
+        if key not in {"minimum_sprite_version", "agent_workflow_version"}
     }
     try:
         _validate_structure(hatch_requirements)
@@ -255,6 +259,7 @@ def load_pet_project(repo_root: Path, pet_id_or_path: str | Path) -> PetProject:
         image_generation_quality=image_generation["quality"],
         image_generation_deprecated=image_generation_deprecated,
         minimum_sprite_version=minimum_sprite_version,
+        agent_workflow_version=agent_workflow_version,
         hatch_engine_requirements=frozen_hatch_requirements,
         spritesheet_path=spritesheet_path,
         manifest_path=package_manifest_path,

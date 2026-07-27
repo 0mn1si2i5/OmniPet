@@ -78,7 +78,7 @@ class VendoredHatchTests(unittest.TestCase):
                 }:
                     expected_vendored = {
                         "scripts/assemble_extended_atlas.py": "27101d97c70cc32fda8f31aeddd9179be66be2c04455b633482a25bb3672e331",
-                        "scripts/prepare_pet_run.py": "168ad2a5e30ec891c6f8c51721da9d4630d9729434c53fc59f5f2a4ec1a2e05d",
+                        "scripts/prepare_pet_run.py": "957c9f3b8e6b101b99d9ff34a3626ebf7f4a0d2179d20604fd3c55dff35eac6f",
                         "references/codex-pet-contract.md": "b91df5e7738a7f64f83a3589efc12a08654821fa271556afe3e4fe065afac047",
                     }[relative_path]
                     self.assertEqual(entry["sha256_vendored"], expected_vendored)

@@ -9,7 +9,20 @@ from typing import Sequence
 import yaml
 
 from omnipet import __version__
-from omnipet.checkpoint import CheckpointError, export_checkpoint, restore_checkpoint
+from omnipet.checkpoint import (
+    CheckpointError,
+    export_checkpoint,
+    restore_checkpoint_for_current_engine,
+)
+from omnipet.design_pack import (
+    approve_design_pack_action,
+    reject_design_pack_action,
+    revise_design_pack_action,
+    submit_design_action,
+    submit_design_pack_summary_action,
+    submit_intake_action,
+    submit_prototype_evidence_action,
+)
 from omnipet.guides import add_generation_guide
 from omnipet.hatch import HatchExecutionError
 from omnipet.package import PackageError, check_package, publish_package, recover_package
@@ -24,6 +37,7 @@ from omnipet.release import (
     approve_project_stage,
     clear_project_block,
     hatch_project,
+    initialize_design_run,
     init_pet_project,
     project_status,
     qa_project_stage,
@@ -35,6 +49,7 @@ from omnipet.run import (
     adopt_canonical,
     load_run_state,
     prepare_run,
+    refresh_prompts,
 )
 
 
@@ -46,10 +61,7 @@ _WORKFLOW_ERRORS = {
 }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:2] == ["qa", "resolve"]:
-        argv[:2] = ["qa-resolve"]
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="omnipet")
     parser.add_argument("--version", action="version", version=f"omnipet {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -65,12 +77,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     hatch = commands.add_parser("hatch")
     hatch.add_argument("pet_id")
     hatch.add_argument("--repo-root", type=Path, default=Path.cwd())
+    hatch.add_argument("--action-id")
+    hatch.add_argument("--run-revision")
     recovery = hatch.add_mutually_exclusive_group()
     recovery.add_argument("--reset-failed")
     recovery.add_argument("--clear-block", action="store_true")
     approve = commands.add_parser("approve")
     approve.add_argument("pet_id")
-    approve.add_argument("--stage", required=True, choices=("base", "standard-rows", "directions", "package"))
+    approve.add_argument("--stage", required=True, choices=("base", "standard-rows", "directions", "package", "design-pack"))
+    approve.add_argument("--principal")
+    approve.add_argument("--action-id")
+    approve.add_argument("--run-revision")
     approve.add_argument("--note")
     approve.add_argument("--repo-root", type=Path, default=Path.cwd())
     qa = commands.add_parser("qa")
@@ -132,6 +149,39 @@ def main(argv: Sequence[str] | None = None) -> int:
     adopt.add_argument("pet_id")
     adopt.add_argument("--reset-generated-work", action="store_true")
     adopt.add_argument("--repo-root", type=Path, default=Path.cwd())
+    refresh = run_commands.add_parser("refresh-prompts")
+    refresh.add_argument("pet_id")
+    refresh.add_argument("--repo-root", type=Path, default=Path.cwd())
+    design = commands.add_parser("design")
+    design_commands = design.add_subparsers(dest="design_command", required=True)
+    design_init = design_commands.add_parser("init")
+    design_init.add_argument("pet_id")
+    design_init.add_argument("--repo-root", type=Path, default=Path.cwd())
+    design_intake = design_commands.add_parser("intake")
+    design_intake.add_argument("pet_id")
+    design_intake.add_argument("--file", required=True, type=Path)
+    design_submit = design_commands.add_parser("submit")
+    design_submit.add_argument("pet_id")
+    for flag in ("contract", "rationale", "storyboard", "prototype-plan", "look-mechanics"):
+        design_submit.add_argument(f"--{flag}", required=True, type=Path)
+    design_prototype = design_commands.add_parser("prototype")
+    design_prototype.add_argument("pet_id")
+    design_prototype.add_argument("--file", required=True, type=Path)
+    design_pack = design_commands.add_parser("pack")
+    design_pack.add_argument("pet_id")
+    design_pack.add_argument("--contact-sheet", required=True, type=Path)
+    design_pack.add_argument("--review", required=True, type=Path)
+    for command in (design_intake, design_submit, design_prototype, design_pack):
+        command.add_argument("--action-id", required=True)
+        command.add_argument("--run-revision", required=True)
+        command.add_argument("--repo-root", type=Path, default=Path.cwd())
+    for name in ("revise", "reject"):
+        decision = design_commands.add_parser(name)
+        decision.add_argument("pet_id")
+        decision.add_argument("--action-id", required=True)
+        decision.add_argument("--run-revision", required=True)
+        decision.add_argument("--reason")
+        decision.add_argument("--repo-root", type=Path, default=Path.cwd())
     checkpoint = commands.add_parser("checkpoint")
     checkpoint_commands = checkpoint.add_subparsers(dest="checkpoint_command", required=True)
     checkpoint_export = checkpoint_commands.add_parser("export")
@@ -142,7 +192,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     checkpoint_restore.add_argument("pet_id")
     checkpoint_restore.add_argument("--repo-root", type=Path, default=Path.cwd())
     checkpoint_restore.add_argument("--force", action="store_true")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] == ["qa", "resolve"]:
+        argv[:2] = ["qa-resolve"]
+    args = _build_parser().parse_args(argv)
 
     if args.command == "pet" and args.pet_command == "init":
         try:
@@ -175,6 +232,56 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, UnicodeError, ProjectValidationError, yaml.YAMLError):
         print(json.dumps({"ok": False, "error": "invalid pet project"}), file=sys.stderr)
         return 1
+
+    run_dir = project.repository_root / ".omnipet/runs" / project.pet_id
+    if args.command == "design":
+        try:
+            if args.design_command == "init":
+                run_dir.parent.mkdir(parents=True, exist_ok=True)
+                state = initialize_design_run(run_dir, project.pet_id, project.references)
+            elif args.design_command == "intake":
+                state = submit_intake_action(
+                    run_dir, _load_json_file(args.file), action_id=args.action_id,
+                    run_revision=args.run_revision,
+                )
+            elif args.design_command == "submit":
+                state = submit_design_action(
+                    run_dir, contract=_load_json_file(args.contract),
+                    rationale=_load_text_file(args.rationale),
+                    storyboard=_load_json_file(args.storyboard),
+                    prototype_plan=_load_json_file(args.prototype_plan),
+                    look_mechanics=_load_json_file(args.look_mechanics),
+                    action_id=args.action_id, run_revision=args.run_revision,
+                )
+            elif args.design_command == "prototype":
+                state = submit_prototype_evidence_action(
+                    run_dir, _load_json_file(args.file), action_id=args.action_id,
+                    run_revision=args.run_revision,
+                )
+            elif args.design_command == "pack":
+                state = submit_design_pack_summary_action(
+                    run_dir, args.contact_sheet, _load_json_file(args.review),
+                    action_id=args.action_id, run_revision=args.run_revision,
+                )
+            elif args.design_command == "revise":
+                state = revise_design_pack_action(
+                    run_dir, args.reason or "revision requested",
+                    action_id=args.action_id, run_revision=args.run_revision,
+                )
+            else:
+                state = reject_design_pack_action(
+                    run_dir, args.reason or "rejected",
+                    action_id=args.action_id, run_revision=args.run_revision,
+                )
+            payload = project_status(project)
+            payload["workflow_state"] = state.state
+            print(json.dumps(payload, sort_keys=True))
+            return 0
+        except Exception:
+            print(json.dumps({
+                "ok": False, "error": f"design {args.design_command} failed",
+            }), file=sys.stderr)
+            return 1
 
     if args.command == "package":
         try:
@@ -282,11 +389,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state = (
                     reset_failed_job(project, args.reset_failed)
                     if args.reset_failed
-                    else clear_project_block(project) if args.clear_block else hatch_project(project)
+                    else clear_project_block(project) if args.clear_block else hatch_project(
+                        project, action_id=args.action_id,
+                        run_revision=args.run_revision,
+                    )
                 )
                 payload = project_status(project)
             elif args.command == "approve":
-                state = approve_project_stage(project, args.stage, note=args.note)
+                if args.stage == "design-pack":
+                    if not args.principal or not args.action_id or not args.run_revision:
+                        raise ValueError("design pack approval arguments are required")
+                    state = approve_design_pack_action(
+                        project, args.principal, args.note, action_id=args.action_id,
+                        run_revision=args.run_revision,
+                    )
+                else:
+                    state = approve_project_stage(project, args.stage, note=args.note)
                 payload = project_status(project)
             elif args.command == "qa":
                 state = qa_project_stage(project, args.stage, verdict_file=args.verdict_file)
@@ -320,7 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "completed_jobs": manifest["completed_jobs"],
                 }, sort_keys=True))
             else:
-                state = restore_checkpoint(project, force=args.force)
+                state = restore_checkpoint_for_current_engine(project, force=args.force)
                 print(json.dumps({
                     "ok": True,
                     "pet_id": state.pet_id,
@@ -345,6 +463,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     project.repository_root,
                     reset_generated_work=args.reset_generated_work,
                 )
+            elif args.run_command == "refresh-prompts":
+                state = refresh_prompts(project, project.repository_root)
             else:
                 state = load_run_state(
                     project.repository_root,
@@ -355,24 +475,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             error = {
                 "prepare": "run preparation failed",
                 "adopt-canonical": "canonical adoption failed",
+                "refresh-prompts": "refresh prompts failed",
             }.get(args.run_command, "invalid run state")
             print(json.dumps({"ok": False, "error": error}), file=sys.stderr)
             return 1
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "pet_id": state.pet_id,
-                    "run_dir": str(state.run_dir),
-                    "counts": dict(state.counts),
-                    "stages": [
-                        {"name": stage.name, "status": stage.status}
-                        for stage in state.stages
-                    ],
-                },
-                sort_keys=True,
-            )
-        )
+        if hasattr(state, "run_dir"):
+            payload = {
+                "ok": True,
+                "pet_id": state.pet_id,
+                "run_dir": str(state.run_dir),
+                "counts": dict(state.counts),
+                "stages": [
+                    {"name": stage.name, "status": stage.status}
+                    for stage in state.stages
+                ],
+            }
+        else:
+            payload = project_status(project)
+        print(json.dumps(payload, sort_keys=True))
         return 0
 
     print(
@@ -386,6 +506,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _load_json_file(path: Path):
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("JSON input must be an object")
+    return value
+
+
+def _load_text_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -53,8 +53,8 @@ LOOK_CARDINALS = [
 
 STATE_PROMPTS = {
     "idle": "Calm low-distraction resting loop: subtle breathing, tiny blink, slight head/body bob, and only quiet persona-preserving motion.",
-    "running-right": "Dragging-right loop: show directional movement to the right through body and limb poses only.",
-    "running-left": "Dragging-left loop: show directional movement to the left through body and limb poses only.",
+    "running-right": "Dragging-right loop: show directional movement to the right through body and limb poses only. The character must face and travel right — rotate the body, shift the gaze direction, and lean into the movement.",
+    "running-left": "Dragging-left loop: show directional movement to the left through body and limb poses only. The character must face and travel left — rotate the body, shift the gaze direction, and lean into the movement.",
     "waving": "Greeting loop: paw or limb down, raised, tilted, and returning in a friendly attention gesture.",
     "jumping": "Hover jump loop: anticipation, lift, airborne peak, descent, and settle through body height.",
     "failed": "Blocked/failed loop: slumped or deflated reaction with sad or closed eyes.",
@@ -75,40 +75,48 @@ STATE_REQUIREMENTS = {
     ],
     "waving": [
         "Show the greeting through paw, hand, wing, or limb pose only.",
+        "Vary the expression and pose between frames to convey a friendly, animated greeting.",
         "Do not draw wave marks, motion arcs, lines, sparkles, symbols, or floating effects around the gesture.",
     ],
     "jumping": [
         "Show the jump through pose and vertical body position only: anticipation, lift, airborne peak, descent, settle.",
+        "Vary the expression between frames to convey effort at the peak and relief on landing.",
         "Do not draw ground shadows, contact shadows, drop shadows, oval shadows, landing marks, dust, smears, bounce pads, or motion marks under the pet.",
         "Keep the background outside the pet perfectly flat chroma key with no darker key-colored patches.",
     ],
     "failed": [
         "Show failure through slumped pose, drooping ears/limbs, closed or sad eyes, and lower body position.",
+        "Vary the expression between frames to show the emotional shift from disappointment to recovery.",
         "Tears, small smoke puffs, or tiny stars are allowed only if attached to or overlapping the pet silhouette and kept inside the same frame slot.",
         "Do not draw red X marks, floating symbols, detached stars, separated smoke clouds, falling tear drops, dust, or other loose effects.",
     ],
     "waiting": [
         "Show that Codex needs approval, help, or user input through an expectant asking pose.",
+        "Vary the expression and pose between frames to convey growing anticipation.",
         "Keep the motion patient and readable, without turning it into ordinary idle or review.",
     ],
     "running": [
         "Show the pet actively working or processing, as if running a task: focused posture, busy hands or paws, purposeful bobbing, thinking motion, tool or prop motion only if already part of the pet identity, or other non-locomotion activity.",
+        "Vary the expression and pose between frames to convey concentration and effort.",
         "Do not show literal foot-running, jogging, sprinting, treadmill motion, raised knees, long steps, pumping arms, directional travel, speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
     ],
     "review": [
         "Show review through lean, blink, narrowed eyes, head tilt, or paw/hand position.",
+        "Vary the expression and pose between frames to convey focused inspection.",
         "Do not add magnifying glasses, papers, code, UI, punctuation, symbols, or other new props unless they already exist in the base pet identity.",
     ],
     "running-right": [
         "Show directional drag movement to the right through body, limb, and prop movement only.",
-        "The row must unmistakably face and travel right.",
+        "The character must unmistakably face and travel right — rotate the body, change the gaze direction, and shift weight rightward.",
         "The movement cadence must alternate visibly across the 8 frames instead of repeating one nearly static stride.",
+        "Vary the pose and expression between frames to convey effort, momentum, and direction.",
         "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
     ],
     "running-left": [
         "Show directional drag movement to the left through body, limb, and prop movement only.",
-        "The row must unmistakably face and travel left.",
+        "The character must unmistakably face and travel left — rotate the body, change the gaze direction, and shift weight leftward.",
         "The movement cadence must alternate visibly across the 8 frames instead of repeating one nearly static stride.",
+        "Vary the pose and expression between frames to convey effort, momentum, and direction.",
         "Do not draw speed lines, dust clouds, floor shadows, motion trails, or detached motion effects.",
     ],
 }
@@ -535,11 +543,12 @@ def row_prompt(args: argparse.Namespace, state: str, row: int, frames: int, purp
 
 Use the attached canonical base for identity. Use the attached layout guide only for slot count, spacing, centering, and padding; do not draw the guide.
 
-Output exactly {frames} full-body frames in one left-to-right row on flat pure {chroma_name} {chroma_key}. Treat the row as {frames} invisible equal-width slots: one centered complete pose per slot, evenly spaced, with no overlap, clipping, empty slots, labels, or borders.
+Output exactly {frames} full-body frames in one left-to-right row on flat pure {chroma_name} {chroma_key}. Treat the row as {frames} invisible equal-width slots: one centered complete pose per slot, evenly spaced, with no overlap, clipping, empty slots, labels, or borders. Keep a clear chroma-only gap between neighboring poses so each complete pose can be detected as a separate group without cutting through foreground; never let two poses touch or merge into one connected silhouette.
 
-Identity: same pet in every frame: {pet_notes}. Preserve silhouette, face, proportions, markings, palette, material, style, and props.
+Identity: same pet in every frame: {pet_notes}. Preserve core identity — palette, costume, props, species, proportions, and style. Vary pose, expression, body orientation, facing direction, and posture freely between frames to convey the action; the character is a living, animated being, not a static statue.
 Style: {style_contract}
 Animation continuity: keep apparent pet scale and baseline stable within the row unless the state itself intentionally changes vertical position, such as `jumping`. Move the pose within the slot instead of redrawing the pet larger or smaller frame to frame.
+Composition: the character must fill at least 75% of the slot height. Do not leave large empty space above, below, or around the character. The character should be large, prominent, and clearly readable at small sizes — not small or distant.
 
 State action: {state_prompt}
 
@@ -559,16 +568,17 @@ def retry_row_prompt(
     state_requirements = "\n".join(f"- {line}" for line in STATE_REQUIREMENTS[state])
     return f"""Create Codex pet row `{state}` for `{args.pet_id}`: exactly {frames} full-body frames in one horizontal strip on flat pure {chroma_name} {chroma_key}.
 
-Use the attached canonical base for identity and the layout guide only for spacing. Same pet in every frame: {pet_notes}. Preserve silhouette, face, palette, material, proportions, markings, and props.
+Use the attached canonical base for identity and the layout guide only for spacing. Same pet in every frame: {pet_notes}. Preserve core identity — palette, costume, props, species, proportions, and style. Vary pose, expression, body orientation, facing direction, and posture freely between frames to convey the action.
 
 Keep apparent pet scale and baseline stable within the row unless the state itself intentionally changes vertical position, such as `jumping`.
+Composition: the character must fill at least 75% of the slot height. Do not leave large empty space above, below, or around the character. The character should be large, prominent, and clearly readable at small sizes — not small or distant.
 
 Action: {state_prompt}
 
 State requirements:
 {state_requirements}
 
-One centered complete pose per invisible slot. No text, boxes, guide marks, scenery, shadows, glows, motion blur, speed lines, dust, detached effects, stray pixels, or {chroma_key} colors in the pet."""
+One centered complete pose per invisible slot. No text, boxes, guide marks, scenery, shadows, glows, motion blur, speed lines, dust, detached effects, stray pixels, or {chroma_key} colors in the pet. Keep a clear chroma-only gap between neighboring poses so each pose separates cleanly without cutting through foreground; never let two poses touch or merge into one connected silhouette."""
 
 
 def look_row_boundary_contract(row: int) -> str:

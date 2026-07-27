@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -125,7 +126,7 @@ def export_checkpoint(project: PetProject, *, force: bool = False) -> Path:
         raise CheckpointError("checkpoint export failed") from None
 
 
-def restore_checkpoint(
+def _restore_checkpoint_phase1(
     project: PetProject,
     *,
     force: bool = False,
@@ -157,6 +158,90 @@ def restore_checkpoint(
             raise
     except Exception:
         raise CheckpointError("checkpoint restore failed") from None
+
+
+def restore_checkpoint(
+    project: PetProject,
+    *,
+    force: bool = False,
+) -> RunState:
+    return restore_checkpoint_for_current_engine(project, force=force)
+
+
+def restore_checkpoint_v2(
+    project: PetProject,
+    *,
+    force: bool = False,
+) -> RunState:
+    del force
+    checkpoint = project.root / "checkpoint"
+    try:
+        if checkpoint.is_symlink() or not checkpoint.is_dir() or checkpoint.parent != project.root:
+            raise ValueError("checkpoint root is invalid")
+        path = checkpoint / "checkpoint.json"
+        payload = _read_json_no_follow(path)
+        if not isinstance(payload, dict):
+            raise ValueError("checkpoint marker is invalid")
+        schema_version = payload.get("schema_version")
+        if type(schema_version) is int and schema_version == 1:
+            raise CheckpointError("explicit migration required")
+        if (
+            type(schema_version) is not int
+            or schema_version != 2
+            or set(payload) != {"schema_version", "source_workflow_schema_version"}
+            or type(payload.get("source_workflow_schema_version")) is not int
+            or payload.get("source_workflow_schema_version") != 2
+        ):
+            raise ValueError("checkpoint marker is invalid")
+        raise CheckpointError("checkpoint restore unsupported")
+    except CheckpointError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise CheckpointError("checkpoint restore invalid") from None
+
+
+def restore_checkpoint_for_current_engine(
+    project: PetProject,
+    *,
+    force: bool = False,
+) -> RunState:
+    try:
+        marker = _read_json_no_follow(project.root / "checkpoint" / "checkpoint.json")
+        if not isinstance(marker, dict):
+            raise ValueError("checkpoint marker is invalid")
+        checkpoint_version = marker.get("schema_version")
+        if type(checkpoint_version) is int and checkpoint_version == 1:
+            raise CheckpointError("explicit migration required")
+        checkpoint_v2 = (
+            type(checkpoint_version) is int
+            and checkpoint_version == 2
+            and set(marker) == {"schema_version", "source_workflow_schema_version"}
+            and type(marker.get("source_workflow_schema_version")) is int
+            and marker["source_workflow_schema_version"] == 2
+        )
+        if not checkpoint_v2:
+            raise ValueError("checkpoint marker is invalid")
+        run_dir = project.repository_root / ".omnipet" / "runs" / project.pet_id
+        workflow_path = run_dir / "workflow.json"
+        workflow_v2 = False
+        if workflow_path.exists() or workflow_path.is_symlink():
+            workflow = _read_json_no_follow(workflow_path)
+            version = workflow.get("schema_version") if isinstance(workflow, dict) else None
+            if type(version) is not int or version not in {1, 2}:
+                raise ValueError("workflow marker is invalid")
+            from omnipet.workflow import WorkflowError, load_workflow
+            try:
+                load_workflow(run_dir)
+            except WorkflowError:
+                raise ValueError("workflow marker is invalid") from None
+            workflow_v2 = version == 2
+        if checkpoint_v2 or workflow_v2:
+            return restore_checkpoint_v2(project, force=force)
+        raise ValueError("checkpoint marker is invalid")
+    except CheckpointError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise CheckpointError("checkpoint restore invalid") from None
 
 
 def _validated_checkpoint(project: PetProject, root: Path) -> dict[str, Any]:
@@ -599,9 +684,20 @@ def _copy_checked(source: Path, destination: Path) -> None:
 
 
 def _read_json(path: Path) -> Any:
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("checkpoint metadata is missing")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _read_json_no_follow(path)
+
+
+def _read_json_no_follow(path: Path) -> Any:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("checkpoint metadata is unsafe")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return json.loads(b"".join(chunks).decode("utf-8"))
+    finally:
+        os.close(descriptor)
 
 
 def _write_json(path: Path, payload: Any) -> None:

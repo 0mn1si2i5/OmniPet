@@ -16,7 +16,7 @@ from omnipet.approvals import (
     approve_stage,
     load_approvals,
 )
-from omnipet.checkpoint import restore_checkpoint
+from omnipet.checkpoint import _restore_checkpoint_phase1
 from omnipet.package import PackageError, check_package
 from omnipet.project import load_pet_project
 from omnipet.review_resolution import create_warning_resolution
@@ -610,7 +610,7 @@ class CheckpointWorkflowMigrationTests(unittest.TestCase):
         clone = self._external_clone()
         project = load_pet_project(clone, ".")
 
-        state = restore_checkpoint(project)
+        state = _restore_checkpoint_phase1(project)
         workflow = refresh_workflow(state.run_dir)
 
         self.assertEqual(workflow.state, "generating_standard_rows")
@@ -629,7 +629,7 @@ class CheckpointWorkflowMigrationTests(unittest.TestCase):
         base_qa.unlink()
         checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
-        state = restore_checkpoint(load_pet_project(clone, "."))
+        state = _restore_checkpoint_phase1(load_pet_project(clone, "."))
 
         self.assertEqual(refresh_workflow(state.run_dir).state, "preparing")
         self.assertEqual(load_approvals(state.run_dir), ())
@@ -643,7 +643,7 @@ class CheckpointWorkflowMigrationTests(unittest.TestCase):
         now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
 
         with patch("omnipet.approvals._utc_now", return_value=now):
-            state = restore_checkpoint(load_pet_project(clone, "."))
+            state = _restore_checkpoint_phase1(load_pet_project(clone, "."))
 
         approval, = load_approvals(state.run_dir)
         self.assertEqual(approval.approved_at, "2026-07-22T12:00:00+00:00")

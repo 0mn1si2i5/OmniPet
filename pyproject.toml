@@ -46,6 +46,8 @@ include = ["omnipet*"]
 
 [tool.setuptools.package-data]
 omnipet = [
+  "agent/contracts/*.json",
+  "agent/schemas/*.json",
   "_vendor/hatch/NOTICE",
   "_vendor/hatch/*.json",
   "_vendor/hatch/*.md",

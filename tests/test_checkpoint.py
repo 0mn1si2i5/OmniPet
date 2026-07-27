@@ -14,8 +14,8 @@ from omnipet.canvas import canvas_for_job
 from omnipet.checkpoint import (
     CheckpointError,
     _normalized_evidence_bytes,
+    _restore_checkpoint_phase1,
     export_checkpoint,
-    restore_checkpoint,
 )
 from omnipet.cli import main
 from omnipet.project import load_pet_project
@@ -60,7 +60,7 @@ class PortableCheckpointTests(unittest.TestCase):
         clone_project = load_pet_project(clone, ".")
 
         with patch("omnipet.checkpoint.prepare_run", side_effect=self._fake_prepare):
-            state = restore_checkpoint(clone_project)
+            state = _restore_checkpoint_phase1(clone_project)
 
         self.assertEqual(state.counts["complete"], 2)
         self.assertEqual(state.counts["ready"], 1)
@@ -93,7 +93,7 @@ class PortableCheckpointTests(unittest.TestCase):
         self.assertNotIn(str(self.root), json.dumps(payload))
 
         shutil.rmtree(self.root / ".omnipet")
-        restored = restore_checkpoint(project)
+        restored = _restore_checkpoint_phase1(project)
 
         self.assertEqual(project_status(project)["workflow_state"], "generating_standard_rows")
         self.assertTrue((restored.run_dir / "qa/base/review.json").is_file())
@@ -146,7 +146,7 @@ class PortableCheckpointTests(unittest.TestCase):
         self.assertNotIn(str(self.root), (checkpoint / "qa/standard/review.json").read_text())
 
         shutil.rmtree(self.root / ".omnipet")
-        restored = restore_checkpoint(project)
+        restored = _restore_checkpoint_phase1(project)
 
         self.assertEqual([record.stage for record in load_approvals(restored.run_dir)], ["base", "standard-rows"])
         self.assertEqual(project_status(project)["workflow_state"], "generating_directions")
@@ -337,7 +337,7 @@ class PortableCheckpointTests(unittest.TestCase):
                 shutil.rmtree(self.root / ".omnipet", ignore_errors=True)
                 with patch("omnipet.checkpoint.prepare_run") as prepare:
                     with self.assertRaises(CheckpointError):
-                        restore_checkpoint(self.project)
+                        _restore_checkpoint_phase1(self.project)
                 prepare.assert_not_called()
                 self.assertFalse((self.root / ".omnipet").exists())
 
@@ -354,7 +354,7 @@ class PortableCheckpointTests(unittest.TestCase):
 
         with patch("omnipet.checkpoint.prepare_run") as prepare:
             with self.assertRaises(CheckpointError):
-                restore_checkpoint(self.project)
+                _restore_checkpoint_phase1(self.project)
 
         prepare.assert_not_called()
 
@@ -368,7 +368,7 @@ class PortableCheckpointTests(unittest.TestCase):
 
         with patch("omnipet.checkpoint.prepare_run") as prepare:
             with self.assertRaises(CheckpointError):
-                restore_checkpoint(self.project)
+                _restore_checkpoint_phase1(self.project)
 
         prepare.assert_not_called()
 
@@ -381,7 +381,7 @@ class PortableCheckpointTests(unittest.TestCase):
 
         with patch("omnipet.checkpoint.prepare_run") as prepare:
             with self.assertRaises(CheckpointError):
-                restore_checkpoint(self.project)
+                _restore_checkpoint_phase1(self.project)
 
         prepare.assert_not_called()
         self.assertFalse((self.root / ".omnipet").exists())
@@ -413,7 +413,7 @@ class PortableCheckpointTests(unittest.TestCase):
 
                 with patch("omnipet.checkpoint.prepare_run") as prepare:
                     with self.assertRaises(CheckpointError):
-                        restore_checkpoint(self.project)
+                        _restore_checkpoint_phase1(self.project)
 
                 prepare.assert_not_called()
                 self._write_run(self.run_dir, {"base", "idle"})
@@ -422,9 +422,9 @@ class PortableCheckpointTests(unittest.TestCase):
         export_checkpoint(self.project)
 
         with self.assertRaises(CheckpointError):
-            restore_checkpoint(self.project)
+            _restore_checkpoint_phase1(self.project)
         with patch("omnipet.checkpoint.prepare_run", side_effect=self._fake_prepare):
-            state = restore_checkpoint(self.project, force=True)
+            state = _restore_checkpoint_phase1(self.project, force=True)
 
         self.assertEqual(state.counts["complete"], 2)
         archives = self.root / ".omnipet" / "archives"
@@ -462,7 +462,7 @@ class PortableCheckpointTests(unittest.TestCase):
 
                 with patch("omnipet.checkpoint.prepare_run") as prepare:
                     with self.assertRaises(CheckpointError):
-                        restore_checkpoint(self.project, force=True)
+                        _restore_checkpoint_phase1(self.project, force=True)
 
                 prepare.assert_not_called()
                 self.assertEqual(marker.read_text(encoding="utf-8"), "unchanged")
@@ -488,7 +488,7 @@ class PortableCheckpointTests(unittest.TestCase):
         self.assertEqual(export_checkpoint(self.project, force=True), checkpoint)
         self.assertEqual(list(self.root.glob(".checkpoint-backup-*")), [])
 
-    def test_cli_exports_and_restores_checkpoint(self):
+    def test_cli_exports_checkpoint_and_requires_explicit_migration_to_restore(self):
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             result = main(["checkpoint", "export", ".", "--repo-root", str(self.root)])
@@ -496,11 +496,20 @@ class PortableCheckpointTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())["completed_jobs"], ["base", "idle"])
 
         shutil.rmtree(self.root / ".omnipet")
-        stdout = io.StringIO()
-        with patch("omnipet.checkpoint.prepare_run", side_effect=self._fake_prepare), redirect_stdout(stdout):
+        stderr = io.StringIO()
+        with (
+            patch("omnipet.checkpoint.prepare_run") as prepare,
+            patch("omnipet.approvals.migrate_checkpoint_base_approval") as migrate,
+            redirect_stderr(stderr),
+        ):
             result = main(["checkpoint", "restore", ".", "--repo-root", str(self.root)])
-        self.assertEqual(result, 0)
-        self.assertEqual(json.loads(stdout.getvalue())["counts"]["complete"], 2)
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            json.loads(stderr.getvalue()),
+            {"ok": False, "error": "checkpoint restore failed"},
+        )
+        prepare.assert_not_called()
+        migrate.assert_not_called()
 
     def test_cli_checkpoint_errors_are_sanitized(self):
         stderr = io.StringIO()

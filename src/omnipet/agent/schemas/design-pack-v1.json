@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/design-pack-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pet_id", "design_revision", "artifacts", "hashes", "schema_versions", "budget_authorization", "accepted_warnings", "owner_decisions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pet_id": {"type": "string", "minLength": 1},
+    "design_revision": {"type": "string", "minLength": 1},
+    "artifacts": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "kind"], "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "kind": {"type": "string", "enum": ["design", "prototype", "review", "contact-sheet"]}}}},
+    "hashes": {"type": "object", "additionalProperties": false, "required": ["prototype_plan_sha256", "contact_sheet_sha256"], "properties": {"prototype_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "contact_sheet_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+    "schema_versions": {"type": "object", "additionalProperties": false, "required": ["intake", "design_contract", "state_storyboard", "prototype_plan", "look_mechanics", "prototype_evidence"], "properties": {"intake": {"const": 1}, "design_contract": {"const": 1}, "state_storyboard": {"const": 1}, "prototype_plan": {"const": 1}, "look_mechanics": {"const": 1}, "prototype_evidence": {"const": 1}}},
+    "budget_authorization": {"type": "object", "additionalProperties": false, "required": ["authorized_usd", "estimated_provider_calls"], "properties": {"authorized_usd": {"type": "number", "minimum": 0}, "estimated_provider_calls": {"type": "integer", "minimum": 0}}},
+    "accepted_warnings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "owner_decisions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

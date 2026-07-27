@@ -12,6 +12,7 @@ image_generation:
   quality: low
 hatch_engine:
   minimum_sprite_version: 2
+  agent_workflow_version: 2
 package:
   spritesheet: dist/spritesheet.webp
   manifest: dist/pet.json

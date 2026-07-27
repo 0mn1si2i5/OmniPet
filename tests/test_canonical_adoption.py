@@ -12,7 +12,7 @@ from PIL import Image
 
 from omnipet.cli import main
 from omnipet.project import load_pet_project
-from omnipet.run import RunPreparationError, adopt_canonical, load_run_state
+from omnipet.run import RunPreparationError, adopt_canonical, load_run_state, prepare_run
 
 from tests.test_project import VALID_PET_YAML
 from tests.test_run import JOB_IDS, JOB_KINDS
@@ -147,8 +147,8 @@ class CanonicalAdoptionTests(unittest.TestCase):
         }
         self.assertEqual(listed, actual)
 
-        generated_names = [path.name for path in (self.run_dir / "generated-sources").iterdir()]
-        self.assertEqual(generated_names, [generated.name])
+        generated_names = {path.name for path in (self.run_dir / "generated-sources").iterdir()}
+        self.assertEqual(generated_names, {generated.name, "base.png"})
         self.assertNotEqual(generated.name, "base-old.png")
         prompt_text = "\n".join(
             path.read_text(encoding="utf-8")
@@ -176,7 +176,47 @@ class CanonicalAdoptionTests(unittest.TestCase):
         self.assertEqual(prompt_manifest, actual_prompt_hashes)
         self._assert_no_dead_absolute_paths_or_secrets(self.run_dir)
 
-    def test_active_qa_extras_require_reset_and_are_archived(self):
+    def test_adoption_creates_base_evidence_for_workflow_progression(self):
+        from omnipet.workflow import refresh_workflow
+
+        adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
+        digest = hashlib.sha256(self.project.canonical_base_path.read_bytes()).hexdigest()
+
+        candidate = self._read_json(self.run_dir / "qa" / "candidates" / "base.json")
+        self.assertEqual(candidate["schema_version"], 1)
+        self.assertEqual(candidate["job_id"], "base")
+        self.assertEqual(candidate["source_path"], "generated-sources/base.png")
+        self.assertEqual(candidate["canvas"], {"aspect_ratio": "1:1", "image_size": "1K"})
+        self.assertEqual(candidate["sha256"], digest)
+
+        base_source = self.run_dir / "generated-sources" / "base.png"
+        self.assertTrue(base_source.is_file())
+        self.assertFalse(base_source.is_symlink())
+        self.assertEqual(hashlib.sha256(base_source.read_bytes()).hexdigest(), digest)
+
+        review = self._read_json(self.run_dir / "qa" / "base" / "review.json")
+        self.assertEqual(
+            set(review),
+            {"adoption_decision", "canvas", "completed_at", "job_id", "ok", "sha256"},
+        )
+        self.assertEqual(review["job_id"], "base")
+        self.assertTrue(review["ok"])
+        self.assertEqual(review["adoption_decision"], "approved durable canonical")
+        self.assertEqual(review["canvas"], {"aspect_ratio": "1:1", "image_size": "1K"})
+        self.assertEqual(review["sha256"], digest)
+
+        state = refresh_workflow(self.run_dir)
+        self.assertEqual(state.state, "awaiting_base_approval")
+
+    def test_prepare_run_succeeds_after_adoption(self):
+        """After adopt_canonical, omnipet-run.json has extra canonical_base
+        and prompt_manifest fields. prepare_run (called by hatch) must not
+        reject the run dir — it should validate only the core reference
+        mapping and allow adoption-added metadata."""
+        adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
+
+        state = prepare_run(self.project, self.repo_root)
+        self.assertEqual(state.run_dir, self.run_dir)
         adopt_canonical(self.project, self.repo_root, reset_generated_work=True)
         extra_result = self.run_dir / "qa" / "visual-jobs" / "idle.result.json"
         extra_result.write_text('{"job_id":"idle"}\n', encoding="utf-8")
@@ -199,6 +239,7 @@ class CanonicalAdoptionTests(unittest.TestCase):
             {
                 "progress.md", "time-log.json",
                 f"visual-jobs/canonical-approved-{digest[:12]}.result.json",
+                "candidates/base.json", "base/review.json",
             },
         )
         archive = sorted((self.repo_root / ".omnipet" / "archives").glob("sample-pet-canonical-adoption-*"))[-1]
@@ -321,7 +362,7 @@ class CanonicalAdoptionTests(unittest.TestCase):
 
         adopt_canonical(self.project, self.repo_root)
 
-        self.assertIn("quiet breathing", idle.read_text(encoding="utf-8").lower())
+        self.assertIn("subtle breathing", idle.read_text(encoding="utf-8").lower())
         self.assertEqual(
             len(tuple((self.repo_root / ".omnipet" / "archives").iterdir())),
             before_archives + 1,

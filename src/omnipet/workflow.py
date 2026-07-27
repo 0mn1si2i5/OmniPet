@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import fcntl
 import os
+import stat
 import tempfile
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,8 +35,38 @@ STATES = (
     "complete",
     "blocked",
 )
+PHASE2_STATES = (
+    "intake",
+    "designing",
+    "prototyping",
+    "awaiting_design_pack_approval",
+    "producing_standard_rows",
+    "producing_directions",
+    "building_package",
+    "awaiting_package_approval",
+    "complete",
+    "blocked",
+    "rejected",
+)
+PHASE2_TRANSITIONS = {
+    ("intake", "intake-validated"): "designing",
+    ("designing", "contracts-validated"): "prototyping",
+    ("prototyping", "prototypes-passed"): "awaiting_design_pack_approval",
+    ("awaiting_design_pack_approval", "design-pack-approved"): "producing_standard_rows",
+}
 _DOCUMENT_KEYS = {"schema_version", "state", "blocked"}
 _BLOCKED_KEYS = {"code", "job", "evidence"}
+_PHASE2_BLOCKED_KEYS = {
+    "code",
+    "prior_state",
+    "job_id",
+    "evidence_path",
+    "root_failure_key",
+    "recoveries",
+    "diagnostic",
+}
+_LOCAL_WORKFLOW_LOCKS: dict[Path, threading.RLock] = {}
+_LOCAL_WORKFLOW_LOCKS_GUARD = threading.Lock()
 
 
 class WorkflowError(RuntimeError):
@@ -49,14 +81,21 @@ class WorkflowState:
 
 def load_workflow(run_dir: Path) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
+    state, version = _load_workflow_unrecovered(run_dir)
+    if version == 2:
+        return load_workflow_v2(run_dir)
+    return state
+
+
+def _load_workflow_unrecovered(run_dir: Path) -> tuple[WorkflowState, int | None]:
     path = run_dir / "workflow.json"
     if not path.exists():
-        return WorkflowState("preparing")
+        return WorkflowState("preparing"), None
     try:
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("workflow document is unsafe")
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or set(data) != _DOCUMENT_KEYS or data.get("schema_version") != 1:
+        data = _read_json_no_follow(path)
+        if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 2:
+            return _validate_workflow_v2(data), 2
+        if not isinstance(data, dict) or set(data) != _DOCUMENT_KEYS or type(data.get("schema_version")) is not int or data["schema_version"] != 1:
             raise ValueError("workflow schema is invalid")
         state, blocked = data.get("state"), data.get("blocked")
         if state not in STATES:
@@ -65,19 +104,140 @@ def load_workflow(run_dir: Path) -> WorkflowState:
             _validate_blocked(blocked)
         if (state == "blocked") != (blocked is not None):
             raise ValueError("workflow blocked state is inconsistent")
-        return WorkflowState(state, blocked)
+        return WorkflowState(state, blocked), 1
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
         raise WorkflowError("workflow is invalid") from None
 
 
+def load_workflow_v2(run_dir: Path) -> WorkflowState:
+    run_dir = _validated_run_dir(run_dir)
+    initial = _load_workflow_v2_unrecovered(run_dir)
+    try:
+        from omnipet.design_pack import recover_intake_submission
+        from omnipet.prototype_jobs import recover_prototype_jobs
+
+        recover_intake_submission(run_dir)
+        recover_prototype_jobs(run_dir)
+    except WorkflowError:
+        raise
+    except Exception:
+        raise WorkflowError("workflow is invalid") from None
+    recovered = _load_workflow_v2_unrecovered(run_dir)
+    return recovered if recovered != initial else initial
+
+
+def _load_workflow_v2_unrecovered(run_dir: Path) -> WorkflowState:
+    path = run_dir / "workflow.json"
+    try:
+        data = _read_json_no_follow(path)
+        if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 1:
+            raise WorkflowError("explicit migration required")
+        return _validate_workflow_v2(data)
+    except WorkflowError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise WorkflowError("workflow is invalid") from None
+
+
+def transition_workflow_v2(run_dir: Path, event: str) -> WorkflowState:
+    run_dir = _validated_run_dir(run_dir)
+    if not isinstance(event, str):
+        raise WorkflowError("workflow transition is invalid")
+    with _workflow_lock(run_dir):
+        return _transition_workflow_v2_unlocked(run_dir, event)
+
+
+def _transition_workflow_v2_unlocked(
+    run_dir: Path,
+    event: str,
+    *,
+    writer=None,
+) -> WorkflowState:
+    current = _load_workflow_v2_unrecovered(run_dir)
+    next_state = PHASE2_TRANSITIONS.get((current.state, event))
+    if next_state is None:
+        raise WorkflowError("workflow transition is invalid")
+    result = WorkflowState(next_state)
+    if writer is None:
+        _write_workflow_v2_unlocked(run_dir, result)
+    else:
+        writer(result)
+    return result
+
+
+def _validate_workflow_v2(data: Any) -> WorkflowState:
+    try:
+        if not isinstance(data, dict) or set(data) != _DOCUMENT_KEYS or type(data.get("schema_version")) is not int or data["schema_version"] != 2:
+            raise ValueError("workflow schema is invalid")
+        state, blocked = data.get("state"), data.get("blocked")
+        if state not in PHASE2_STATES:
+            raise ValueError("workflow state is invalid")
+        if blocked is not None:
+            _validate_blocked_v2(blocked)
+        if (state == "blocked") != (blocked is not None):
+            raise ValueError("workflow blocked state is inconsistent")
+        return WorkflowState(state, blocked)
+    except (TypeError, ValueError):
+        raise WorkflowError("workflow is invalid") from None
+
+
+def _validate_blocked_v2(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != _PHASE2_BLOCKED_KEYS:
+        raise ValueError("blocked schema is invalid")
+    if value["prior_state"] not in set(PHASE2_STATES) - {"blocked", "complete", "rejected"}:
+        raise ValueError("blocked prior state is invalid")
+    _validate_v2_bounded_string(value["code"], "blocked code")
+    for key in ("job_id", "root_failure_key"):
+        if value[key] is not None:
+            _validate_v2_bounded_string(value[key], f"blocked {key}")
+    evidence = value["evidence_path"]
+    if evidence is not None:
+        _validate_v2_bounded_string(evidence, "blocked evidence path")
+        path = Path(evidence)
+        if path == Path(".") or path.is_absolute() or ".." in path.parts:
+            raise ValueError("blocked evidence path is invalid")
+    if value["recoveries"] != []:
+        raise ValueError("blocked recoveries are invalid")
+    if value["diagnostic"] is not None:
+        SafeDiagnostic.from_dict(value["diagnostic"])
+
+
+def _validate_v2_bounded_string(value: Any, name: str) -> None:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 256
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        or contains_credential_like_text(value)
+    ):
+        raise ValueError(f"{name} is invalid")
+
+
+def _read_json_no_follow(path: Path) -> Any:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("JSON document is unsafe")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return json.loads(b"".join(chunks).decode("utf-8"))
+    finally:
+        os.close(descriptor)
+
+
 def refresh_workflow(run_dir: Path) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
+    if _workflow_schema_version(run_dir) == 2:
+        return load_workflow_v2(run_dir)
     with _workflow_lock(run_dir):
         return _refresh_workflow_unlocked(run_dir)
 
 
 def _refresh_workflow_unlocked(run_dir: Path) -> WorkflowState:
-    current = load_workflow(run_dir)
+    current, _ = _load_workflow_unrecovered(run_dir)
+    if _workflow_schema_version(run_dir) == 2:
+        return current
     if current.blocked is not None:
         return current
     try:
@@ -149,12 +309,14 @@ def _refresh_workflow_unlocked(run_dir: Path) -> WorkflowState:
 def approve_workflow_stage(run_dir: Path, stage: str, *, note: str | None = None) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
+        _require_phase1_workflow(run_dir)
         return _approve_workflow_stage_unlocked(run_dir, stage, note=note)
 
 
 def _approve_stage_operation(run_dir: Path, stage: str, *, note: str | None = None):
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
+        _require_phase1_workflow(run_dir)
         expected = _expected_approval_states()
         if stage not in STAGES or _refresh_workflow_unlocked(run_dir).state != expected[stage]:
             raise ApprovalError("workflow is not awaiting this approval")
@@ -180,6 +342,7 @@ def mark_blocked(
 ) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
+        _require_phase1_workflow(run_dir)
         return _mark_blocked_unlocked(
             run_dir, code=code, job=job, evidence=evidence, diagnostic=diagnostic
         )
@@ -207,7 +370,27 @@ def _mark_blocked_unlocked(
 def clear_blocked(run_dir: Path) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
+        _require_phase1_workflow(run_dir)
         return _clear_blocked_unlocked(run_dir)
+
+
+def _require_phase1_workflow(run_dir: Path) -> None:
+    if _workflow_schema_version(run_dir) == 2:
+        raise WorkflowError("legacy workflow operation is unavailable")
+
+
+def _workflow_schema_version(run_dir: Path) -> int | None:
+    path = run_dir / "workflow.json"
+    if not path.exists():
+        return None
+    try:
+        data = _read_json_no_follow(path)
+        version = data.get("schema_version") if isinstance(data, dict) else None
+        if type(version) is not int or version not in {1, 2}:
+            raise ValueError("workflow schema is invalid")
+        return version
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise WorkflowError("workflow is invalid") from None
 
 
 def _clear_blocked_unlocked(run_dir: Path) -> WorkflowState:
@@ -259,6 +442,7 @@ def _expected_approval_states() -> dict[str, str]:
 def mark_package_complete(run_dir: Path) -> WorkflowState:
     run_dir = _validated_run_dir(run_dir)
     with _workflow_lock(run_dir):
+        _require_phase1_workflow(run_dir)
         if _refresh_workflow_unlocked(run_dir).state not in {"awaiting_package_approval", "complete"}:
             raise WorkflowError("package is not approved")
         approvals = invalidate_stale_approvals(run_dir)
@@ -322,6 +506,25 @@ def _write_workflow_unlocked(run_dir: Path, state: WorkflowState) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _write_workflow_v2_unlocked(run_dir: Path, state: WorkflowState) -> None:
+    payload = {"schema_version": 2, "state": state.state, "blocked": state.blocked}
+    path = run_dir / "workflow.json"
+    if path.is_symlink():
+        raise WorkflowError("workflow path is unsafe")
+    descriptor, name = tempfile.mkstemp(prefix=".workflow.json-", dir=run_dir)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(payload, output, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(run_dir)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _validated_run_dir(run_dir: Path) -> Path:
     path = Path(run_dir).absolute()
     if path.is_symlink() or not path.is_dir() or path.resolve() != path:
@@ -330,7 +533,22 @@ def _validated_run_dir(run_dir: Path) -> Path:
 
 
 @contextmanager
-def _workflow_lock(run_dir: Path):
+def _workflow_lock(run_dir: Path, *, blocking: bool = True):
+    with _LOCAL_WORKFLOW_LOCKS_GUARD:
+        local_lock = _LOCAL_WORKFLOW_LOCKS.setdefault(run_dir, threading.RLock())
+    acquired = local_lock.acquire(blocking=blocking)
+    if not acquired:
+        yield False
+        return
+    try:
+        with _workflow_file_lock(run_dir, blocking=blocking) as file_acquired:
+            yield file_acquired
+    finally:
+        local_lock.release()
+
+
+@contextmanager
+def _workflow_file_lock(run_dir: Path, *, blocking: bool = True):
     path = run_dir / ".workflow.lock"
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise WorkflowError("workflow lock path is unsafe")
@@ -340,15 +558,60 @@ def _workflow_lock(run_dir: Path):
         descriptor = os.open(path, flags, 0o600)
     except OSError:
         raise WorkflowError("workflow lock is unavailable") from None
+    file_acquired = False
     try:
         os.fchmod(descriptor, 0o600)
         if not existed:
             _fsync_directory(run_dir)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
+        try:
+            fcntl.flock(
+                descriptor,
+                fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB),
+            )
+        except BlockingIOError:
+            yield False
+            return
+        file_acquired = True
+        _validate_lock_identity(descriptor, path=path)
+        yield True
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        pending = None
+        if file_acquired:
+            try:
+                _validate_lock_identity(descriptor, path=path)
+            except Exception:
+                pending = WorkflowError("workflow lock is unavailable")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        else:
+            os.close(descriptor)
+        if pending is not None:
+            raise pending from None
+
+
+def _validate_lock_identity(
+    descriptor: int,
+    *,
+    path: Path | None = None,
+    directory_fd: int | None = None,
+    name: str = ".workflow.lock",
+) -> None:
+    opened = os.fstat(descriptor)
+    current = (
+        os.stat(path, follow_symlinks=False)
+        if path is not None
+        else os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    )
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or not stat.S_ISREG(current.st_mode)
+        or opened.st_nlink != 1
+        or current.st_nlink != 1
+        or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+    ):
+        raise WorkflowError("workflow lock is unavailable")
 
 
 def _fsync_directory(path: Path) -> None:

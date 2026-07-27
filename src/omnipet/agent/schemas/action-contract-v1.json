@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/action-contract-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action_contract_version", "run_revision", "state", "actions", "budget"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "action_contract_version": {"const": 1},
+    "run_revision": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "state": {"type": "string", "enum": ["intake", "designing", "prototyping", "awaiting_design_pack_approval", "producing_standard_rows", "producing_directions", "building_package", "awaiting_package_approval", "complete", "blocked", "rejected"]},
+    "actions": {"type": "array", "uniqueItems": true, "items": {"type": "object", "description": "Runtime additionally requires id to equal kind plus the contract run revision, unique action IDs, sorted unique evidence paths, and state/action/precondition consistency.", "additionalProperties": false, "required": ["id", "kind", "command", "required_inputs", "bound_evidence", "preconditions", "owner_required", "reason_code"], "properties": {
+      "id": {"type": "string", "minLength": 1},
+      "kind": {"type": "string", "minLength": 1},
+      "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+      "required_inputs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "type"], "properties": {"name": {"type": "string", "minLength": 1}, "type": {"type": "string", "enum": ["non-empty-string", "path", "boolean", "integer", "number"]}, "allowed_values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}}},
+      "bound_evidence": {"type": "array", "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^/]+(?:/[^/]+)*$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
+      "preconditions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"type": "string", "minLength": 1}, "value": {"type": "string", "minLength": 1}}}},
+      "owner_required": {"type": "boolean"},
+      "reason_code": {"type": "string", "minLength": 1}
+    }}},
+    "budget": {"type": "object", "additionalProperties": false, "required": ["authorized_usd", "estimated_spent_usd", "next_call_estimate_usd"], "properties": {"authorized_usd": {"type": "number", "minimum": 0}, "estimated_spent_usd": {"type": "number", "minimum": 0}, "next_call_estimate_usd": {"type": "number", "minimum": 0}}}
+  }
+}

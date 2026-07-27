@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnipet.dev/schemas/design-contract-v1.json",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_contract_version", "pet_id", "design_revision", "character_construction", "reference_view_coverage", "asymmetries", "motion_freedom", "state_grammar", "generation_risks", "prototype_requirements", "prohibited_strategies", "accepted_defaults", "owner_decisions", "known_limitations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "skill_contract_version": {"type": "integer", "const": 1},
+    "pet_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "design_revision": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^[^\\x00-\\x1F\\x7F]+$"},
+    "character_construction": {"type": "object", "additionalProperties": false, "required": ["bodies", "relationships", "contact_points", "stable_anchors"], "properties": {
+      "bodies": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["body_id", "kind", "parts"],
+          "properties": {
+            "body_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string", "minLength": 1},
+            "parts": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        }
+      },
+      "relationships": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "relation", "object"],
+          "properties": {
+            "subject": {"type": "string", "minLength": 1},
+            "relation": {"type": "string", "enum": ["attached", "mounted", "held", "overlapping"]},
+            "object": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "contact_points": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["first_part", "second_part", "constraint"],
+          "properties": {
+            "first_part": {"type": "string", "minLength": 1},
+            "second_part": {"type": "string", "minLength": 1},
+            "constraint": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "stable_anchors": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    }},
+    "reference_view_coverage": {"type": "object", "additionalProperties": false, "required": ["supported", "unsupported"], "properties": {
+      "supported": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["view", "reference_paths"], "properties": {"view": {"type": "string", "minLength": 1}, "reference_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}},
+      "unsupported": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["view", "reason", "dependent_states"], "properties": {"view": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1}, "dependent_states": {"type": "array", "items": {"type": "string", "minLength": 1}}}}}
+    }},
+    "asymmetries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["part", "kind", "mirror_safe"], "properties": {"part": {"type": "string", "minLength": 1}, "kind": {"type": "string", "enum": ["handedness", "one-sided-prop", "opening", "marking", "lighting", "other"]}, "mirror_safe": {"type": "boolean"}}}},
+    "motion_freedom": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["part", "freedom"], "properties": {"part": {"type": "string", "minLength": 1}, "freedom": {"type": "string", "enum": ["anchored", "rigid", "articulated", "deformable", "trailing", "occluding"]}}}},
+    "state_grammar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idle", "running-right", "running-left", "waving", "jumping", "failed", "waiting", "running", "review"],
+      "properties": {
+        "idle": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "running-right": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "running-left": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "waving": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "jumping": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "failed": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "waiting": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "running": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}},
+        "review": {"type": "object", "additionalProperties": false, "required": ["start_pose", "key_pose", "return_pose", "silhouette_evidence"], "properties": {"start_pose": {"type": "string", "minLength": 1}, "key_pose": {"type": "string", "minLength": 1}, "return_pose": {"type": "string", "minLength": 1}, "silhouette_evidence": {"type": "string", "minLength": 1}}}
+      }
+    },
+    "generation_risks": {"type": "array", "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["risk", "affected_states", "affected_views", "evidence"], "properties": {"risk": {"type": "string", "enum": ["directional_motion", "unsafe_mirror", "compound_character", "airborne_state", "state_extreme", "unsupported_reference_view"]}, "affected_states": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["idle", "running-right", "running-left", "waving", "jumping", "failed", "waiting", "running", "review"]}}, "affected_views": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "evidence": {"type": "string", "minLength": 1}}}},
+    "prototype_requirements": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["pose_id", "purpose", "evidence_kind"], "properties": {"pose_id": {"type": "string", "minLength": 1, "maxLength": 10000, "pattern": "^(?=[^\\x00-\\x1F\\x7F]+$)(?!(?:base|idle|running-right|running-left|waving|jumping|failed|waiting|running|review|look-cardinals|look-row-9|look-row-10)$)[a-z0-9]+(?:-[a-z0-9]+)*$"}, "purpose": {"type": "string", "minLength": 1}, "evidence_kind": {"oneOf": [{"type": "string", "enum": ["animation-ready-canonical", "motion-cycle", "screen-left-anchor", "screen-right-anchor", "stable-attachment", "grounded-anticipation", "airborne", "return-pose"]}, {"type": "string", "pattern": "^(?:state-extreme-anchor|unsupported-view-anchor):[a-z0-9]+(?:-[a-z0-9]+)*$"}]}}}},
+    "prohibited_strategies": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "accepted_defaults": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "owner_decisions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "known_limitations": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "x-omnipet-runtime-validation": ["credential-like-sensitive-text-rejected", "identity-matches-intake-and-run", "unique-pose-ids-and-evidence-kinds", "risk-instances-match-character-and-reference-facts", "minimum-evidence-expanded-per-state-and-view"]
+}
