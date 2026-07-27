@@ -331,7 +331,7 @@ def approve_design_pack(
             request = {
                 "pet_notes": "; ".join(intake["observed_facts"]),
                 "style_contract": intake["style_request"],
-                "chroma_key": {"hex": "#00FFFF", "name": "cyan"},
+                "chroma_key": {"hex": "#FF00FF", "name": "magenta"},
                 "rows": [],
             }
             project = SimpleNamespace(
@@ -391,9 +391,16 @@ def approve_design_pack(
                 "design_pack_sha256": pack_hash,
                 "jobs": jobs,
             }
+            pet_request = {
+                "pet_notes": request["pet_notes"],
+                "style_contract": request["style_contract"],
+                "chroma_key": request["chroma_key"],
+                "rows": [],
+            }
             targets = {
                 run_dir / "qa/approvals-v2.json",
                 run_dir / "imagegen-jobs.json",
+                run_dir / "pet_request.json",
                 run_dir / "workflow.json",
                 *(run_dir / relative for relative in prompt_bytes),
             }
@@ -408,6 +415,7 @@ def approve_design_pack(
                     _write_bytes_atomic(run_dir / relative, content)
                 _write_design_pack_approval(run_dir, approval)
                 _write_bytes_atomic(run_dir / "imagegen-jobs.json", _canonical_json_bytes(manifest))
+                _write_bytes_atomic(run_dir / "pet_request.json", _canonical_json_bytes(pet_request))
                 context = _pin_directories(run_dir)
                 try:
                     result = _transition_workflow_pinned(context, "design-pack-approved")

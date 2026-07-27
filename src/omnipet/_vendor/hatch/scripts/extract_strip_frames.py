@@ -225,6 +225,8 @@ def component_frame_groups(
         sorted(seeds, key=lambda component: component["area"], reverse=True)[:frame_count],
         key=lambda component: component["center_x"],
     )
+    if seeds[-1]["area"] < seeds[0]["area"] * 0.05:
+        return None
     seed_ids = {id(seed) for seed in seeds}
     groups: list[list[dict[str, object]]] = [[seed] for seed in seeds]
     noise_threshold = max(12, largest_area * 0.002)
@@ -334,7 +336,7 @@ def extract_state(
             used_method = "components"
 
     if frames is None:
-        if method == "stable-slots":
+        if method in {"stable-slots", "auto"}:
             frames = extract_stable_slot_frames(strip, frame_count)
             used_method = "stable-slots"
         else:

@@ -818,6 +818,7 @@ def generate_next_standard_row_v2(
         except Exception as error:
             if _job(run_dir, job_id)["status"] == "running":
                 _fail_job(run_dir, job_id)
+                _cleanup_generated_source(run_dir, job_id)
                 _write_json(run_dir / "workflow.json", {
                     "schema_version": 2,
                     "state": "blocked",
@@ -837,6 +838,12 @@ def generate_next_standard_row_v2(
 
 def _standard_row_dispatch_boundary() -> None:
     pass
+
+
+def _cleanup_generated_source(run_dir: Path, job_id: str) -> None:
+    source = run_dir / "generated-sources" / f"{job_id}.png"
+    if source.is_file() and not source.is_symlink():
+        source.unlink()
 
 
 def _generate_direction_action(project: PetProject, run_dir: Path, generator: Any, job_id: str) -> None:
@@ -1069,6 +1076,7 @@ def _qa_row(run_dir: Path, job_id: str) -> None:
         run_dir / "qa/rows" / job_id / "deterministic.json",
         states=(job_id,),
         require_components=True,
+        allow_stable_slots=True,
     ))
     if not result.ok:
         raise ValueError("row QA failed")
@@ -1084,6 +1092,7 @@ def _qa_standard(run_dir: Path) -> None:
         run_dir / "qa/standard/review.json",
         states=STANDARD_JOB_IDS,
         require_components=True,
+        allow_stable_slots=True,
     ))
     if not result.ok:
         raise ValueError("standard QA failed")

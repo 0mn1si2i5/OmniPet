@@ -75,11 +75,13 @@ class VendoredHatchTests(unittest.TestCase):
                     "scripts/assemble_extended_atlas.py",
                     "scripts/prepare_pet_run.py",
                     "references/codex-pet-contract.md",
+                    "scripts/extract_strip_frames.py",
                 }:
                     expected_vendored = {
                         "scripts/assemble_extended_atlas.py": "27101d97c70cc32fda8f31aeddd9179be66be2c04455b633482a25bb3672e331",
                         "scripts/prepare_pet_run.py": "957c9f3b8e6b101b99d9ff34a3626ebf7f4a0d2179d20604fd3c55dff35eac6f",
                         "references/codex-pet-contract.md": "b91df5e7738a7f64f83a3589efc12a08654821fa271556afe3e4fe065afac047",
+                        "scripts/extract_strip_frames.py": "135494bf9ba868195dceb66512eaddd677d58ba0b78077e2ef5922c3acb0282d",
                     }[relative_path]
                     self.assertEqual(entry["sha256_vendored"], expected_vendored)
                     self.assertIs(entry["modified"], True)
