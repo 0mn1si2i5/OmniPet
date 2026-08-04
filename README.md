@@ -2,11 +2,21 @@
 
 [English](README.en.md)
 
-> **Alpha（`0.1.0a1`）**：接口和项目文件仍可能变化；请在正式使用前检查生成结果。
+> **项目状态**
+>
+> OmniPet 是实验性项目，现已进入维护状态，Engine 功能开发已冻结。
+>
+> [OmniPet-Skill](https://github.com/0mn1si2i5/OmniPet-Skill) 及其 `creating-omnipets` 工作流是目前推荐的新桌宠创作路径。
+>
+> 已发布的 OmniPet `0.1.0a1` 和现有工作流仍可使用，但不再积极开发新功能，也不承诺生产级可靠性。
+>
+> [OmniPets](https://github.com/0mn1si2i5/OmniPets) 是最终可安装桌宠资产目录，不是用于创作的 Engine 或 Skill。
+>
+> **Alpha 提示**：`0.1.0a1` 的接口和项目文件仍可能变化；请在正式使用前检查生成结果。
 
-OmniPet 是生成、QA、修复、打包和发布桌宠 sprite v2 的开源引擎。它通过官方 OpenAI SDK 调用 `gpt-image-2`，并把可恢复的本地工作状态、checkpoint 与最终可安装包分开管理。
+OmniPet `0.1.0a1` 是用于生成、QA、修复、打包和发布桌宠 sprite v2 的开源引擎。它通过官方 OpenAI SDK 调用 `gpt-image-2`，并把可恢复的本地工作状态、checkpoint 与最终可安装包分开管理。
 
-只想安装桌宠？请访问公开目录 [OmniPets](https://github.com/0mn1si2i5/OmniPets)。创作者可在本地或私有生产仓中使用 OmniPet，完成后导出已校验的公开发布包。
+只想安装桌宠？请访问公开目录 [OmniPets](https://github.com/0mn1si2i5/OmniPets)。保留的 Engine 工作流仍支持在本地或私有生产仓中完成项目，并导出已校验的公开发布包。
 
 ## 安装与开始
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Froze OmniPet Engine feature development and made OmniPet-Skill the recommended path for creating new pets, while retaining the published `0.1.0a1` workflows for compatibility.
+
 ## [0.1.0a1] - 2026-07-22
 
 ### Added

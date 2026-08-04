@@ -2,11 +2,21 @@
 
 [简体中文](README.md)
 
-> **Alpha (`0.1.0a1`)**: interfaces and project files may change. Inspect generated work before using it in production.
+> **Project status**
+>
+> OmniPet is experimental and now in maintenance mode; Engine feature development is frozen.
+>
+> [OmniPet-Skill](https://github.com/0mn1si2i5/OmniPet-Skill) and its `creating-omnipets` workflow are the recommended path for creating new desktop pets.
+>
+> The published OmniPet `0.1.0a1` and existing workflows remain available, but there is no active feature development or promise of production-grade reliability.
+>
+> [OmniPets](https://github.com/0mn1si2i5/OmniPets) is the catalog of final installable pet assets, not a creator Engine or Skill.
+>
+> **Alpha notice**: interfaces and project files in `0.1.0a1` may change. Inspect generated work before using it in production.
 
-OmniPet is the open-source engine for generating, QAing, repairing, packaging, and releasing v2 desktop-pet sprites. It uses `gpt-image-2` through the official OpenAI SDK and keeps resumable local state, checkpoints, and installable packages separate.
+OmniPet `0.1.0a1` is the open-source engine for generating, QAing, repairing, packaging, and releasing v2 desktop-pet sprites. It uses `gpt-image-2` through the official OpenAI SDK and keeps resumable local state, checkpoints, and installable packages separate.
 
-Want to install a pet? Visit the public [OmniPets](https://github.com/0mn1si2i5/OmniPets) catalog. Creators use OmniPet locally or in a private production repository, then export a verified public release bundle.
+Want to install a pet? Visit the public [OmniPets](https://github.com/0mn1si2i5/OmniPets) catalog. The retained Engine workflow still supports projects run locally or in a private production repository and can export a verified public release bundle.
 
 ## Install and start
 

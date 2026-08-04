@@ -151,6 +151,40 @@ class RepositoryDocumentationTests(unittest.TestCase):
         self.assertIn('license = "Apache-2.0"', metadata)
         self.assertIn('readme = "README.md"', metadata)
 
+    def test_readmes_define_frozen_engine_and_recommended_creator_path(self):
+        readmes = {
+            "zh": (REPO_ROOT / "README.md").read_text(encoding="utf-8"),
+            "en": (REPO_ROOT / "README.en.md").read_text(encoding="utf-8"),
+        }
+        required_statements = {
+            "zh": (
+                "OmniPet 是实验性项目，现已进入维护状态，Engine 功能开发已冻结。",
+                "[OmniPet-Skill](https://github.com/0mn1si2i5/OmniPet-Skill) "
+                "及其 `creating-omnipets` 工作流是目前推荐的新桌宠创作路径。",
+                "已发布的 OmniPet `0.1.0a1` 和现有工作流仍可使用，但不再积极开发新功能，"
+                "也不承诺生产级可靠性。",
+                "[OmniPets](https://github.com/0mn1si2i5/OmniPets) "
+                "是最终可安装桌宠资产目录，不是用于创作的 Engine 或 Skill。",
+            ),
+            "en": (
+                "OmniPet is experimental and now in maintenance mode; "
+                "Engine feature development is frozen.",
+                "[OmniPet-Skill](https://github.com/0mn1si2i5/OmniPet-Skill) "
+                "and its `creating-omnipets` workflow are the recommended path "
+                "for creating new desktop pets.",
+                "The published OmniPet `0.1.0a1` and existing workflows remain available, "
+                "but there is no active feature development or promise of "
+                "production-grade reliability.",
+                "[OmniPets](https://github.com/0mn1si2i5/OmniPets) "
+                "is the catalog of final installable pet assets, not a creator Engine or Skill.",
+            ),
+        }
+
+        for language, statements in required_statements.items():
+            with self.subTest(language=language):
+                for statement in statements:
+                    self.assertIn(statement, readmes[language])
+
     def test_development_setup_declares_and_checks_packaging_backend(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         script = (REPO_ROOT / "scripts/test-all.sh").read_text(encoding="utf-8")
